@@ -268,6 +268,7 @@ railway run go run .
 | GET | `/api/alpha/pick/latest` | 最新選股結果 |
 | GET | `/api/alpha/pick/dates` | 列出有選股結果的日期 |
 | GET | `/api/alpha/pick/summary` | 選股摘要（出現頻率） |
+| GET | `/api/alpha/pick/stock/:symbol` | 個股被選中的歷史紀錄 |
 | GET | `/api/alpha/pick/:date` | 指定日期選股結果 |
 
 #### `GET /api/alpha/pick/latest`
@@ -371,6 +372,37 @@ railway run go run .
 ]
 ```
 
+#### `GET /api/alpha/pick/stock/:symbol`
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `symbol` | string | 股票代號，例如 `2330` |
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `mode` | string | `"alpha"` | 模式（`alpha` / `replay`） |
+
+**Response (200):**
+
+```json
+{
+  "symbol": "2330",
+  "count": 3,
+  "records": [
+    {
+      "trade_date": "2026-03-20",
+      "symbol": "2330",
+      "name": "台積電",
+      "reasons": "法人連續買超；RSI 回升"
+    }
+  ]
+}
+```
+
 #### `GET /api/alpha/pick/:date`
 
 **Path Parameters:**
@@ -432,6 +464,7 @@ railway run go run .
 |--------|------|-------------|
 | GET | `/api/alpha/sell/latest` | 最新賣出警示 |
 | GET | `/api/alpha/sell/summary` | 賣出摘要（出現頻率） |
+| GET | `/api/alpha/sell/stock/:symbol` | 個股被賣出警示的歷史紀錄 |
 | GET | `/api/alpha/sell/:date` | 指定日期賣出警示 |
 
 #### `GET /api/alpha/sell/latest`
@@ -523,6 +556,37 @@ railway run go run .
     "last_date": "2026-03-20"
   }
 ]
+```
+
+#### `GET /api/alpha/sell/stock/:symbol`
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `symbol` | string | 股票代號，例如 `2330` |
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `mode` | string | `"sell"` | 模式 |
+
+**Response (200):**
+
+```json
+{
+  "symbol": "2330",
+  "count": 2,
+  "records": [
+    {
+      "trade_date": "2026-03-20",
+      "symbol": "2330",
+      "name": "台積電",
+      "reasons": "外資連續賣超；RSI 過熱；MACD 轉負"
+    }
+  ]
+}
 ```
 
 #### `GET /api/alpha/sell/:date`

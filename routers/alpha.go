@@ -14,10 +14,12 @@ func RegisterAlpha(rg *gin.RouterGroup) {
 	g.GET("/pick/latest", getLatestPick)
 	g.GET("/pick/dates", listPickDates)
 	g.GET("/pick/summary", getPickSummary)
+	g.GET("/pick/stock/:symbol", getPickBySymbol)
 	g.GET("/pick/:date", getPickByDate)
 
 	g.GET("/sell/latest", getLatestSell)
 	g.GET("/sell/summary", getSellSummary)
+	g.GET("/sell/stock/:symbol", getSellBySymbol)
 	g.GET("/sell/:date", getSellByDate)
 }
 
@@ -131,6 +133,36 @@ func getPickSummary(c *gin.Context) {
 		result = []map[string]any{}
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+func getPickBySymbol(c *gin.Context) {
+	symbol := c.Param("symbol")
+	mode := c.DefaultQuery("mode", "alpha")
+
+	rows, err := db.Pool().Query(c.Request.Context(),
+		`SELECT trade_date, symbol, name, reasons
+		 FROM alpha_pick
+		 WHERE symbol = $1 AND mode = $2
+		 ORDER BY trade_date DESC`, symbol, mode)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Internal server error"})
+		return
+	}
+	defer rows.Close()
+
+	records, err := rowsToMaps(rows)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Internal server error"})
+		return
+	}
+	if records == nil {
+		records = []map[string]any{}
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"symbol":  symbol,
+		"count":   len(records),
+		"records": records,
+	})
 }
 
 func getPickByDate(c *gin.Context) {
@@ -259,6 +291,36 @@ func getSellSummary(c *gin.Context) {
 		result = []map[string]any{}
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+func getSellBySymbol(c *gin.Context) {
+	symbol := c.Param("symbol")
+	mode := c.DefaultQuery("mode", "sell")
+
+	rows, err := db.Pool().Query(c.Request.Context(),
+		`SELECT trade_date, symbol, name, reasons
+		 FROM alpha_sell
+		 WHERE symbol = $1 AND mode = $2
+		 ORDER BY trade_date DESC`, symbol, mode)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Internal server error"})
+		return
+	}
+	defer rows.Close()
+
+	records, err := rowsToMaps(rows)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Internal server error"})
+		return
+	}
+	if records == nil {
+		records = []map[string]any{}
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"symbol":  symbol,
+		"count":   len(records),
+		"records": records,
+	})
 }
 
 func getSellByDate(c *gin.Context) {

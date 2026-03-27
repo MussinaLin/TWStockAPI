@@ -629,6 +629,41 @@ railway run go run .
 
 ---
 
+### Trade Records
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/trade/trade-records` | 查詢交易紀錄 |
+
+#### `GET /api/trade/trade-records`
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `from` | string | 90 天前 | 起始日期（`YYYY-MM-DD`） |
+| `to` | string | 今天 | 結束日期（`YYYY-MM-DD`） |
+
+**Response (200):**
+
+```json
+{
+  "count": 2,
+  "records": [
+    {
+      "symbol": "2330",
+      "name": "台積電",
+      "type": "buy",
+      "trade_date": "2026-03-20",
+      "price": 595.0,
+      "performance": 0.05
+    }
+  ]
+}
+```
+
+---
+
 ## 錯誤回應
 
 所有 API 在伺服器錯誤時回傳：

@@ -47,7 +47,7 @@ func getLatestPick(c *gin.Context) {
 		st.insti_net_30d_sum, st.insti_net_30d_avg,
 		st.bb_bw_5d_avg, st.bb_bw_10d_avg,
 		st.bb_bw_15d_avg, st.bb_bw_30d_avg,
-		p.cond_insti, p.cond_insti_bullish, p.cond_rsi, p.cond_macd,
+		p.cond_insti, p.cond_insti_buy AS cond_insti_bullish, p.cond_rsi, p.cond_macd,
 		p.cond_vol_ma10, p.cond_vol_ma20,
 		p.cond_bb_narrow, p.cond_bb_near_upper, p.cond_turnover_surge,
 		p.reasons
@@ -115,8 +115,12 @@ func getPickSummary(c *gin.Context) {
 	mode := c.DefaultQuery("mode", "alpha")
 
 	rows, err := db.Pool().Query(c.Request.Context(),
-		`SELECT symbol, name, pick_count, first_date, last_date
-		 FROM alpha_pick_summary WHERE mode = $1
+		`SELECT symbol,
+		        (ARRAY_AGG(name ORDER BY trade_date DESC))[1] AS name,
+		        COUNT(*)::int AS pick_count,
+		        MIN(trade_date) AS first_date, MAX(trade_date) AS last_date
+		 FROM alpha_pick WHERE mode = $1
+		 GROUP BY symbol
 		 ORDER BY pick_count DESC`, mode)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Internal server error"})
@@ -175,7 +179,7 @@ func getPickByDate(c *gin.Context) {
 		st.insti_net_10d_sum, st.insti_net_10d_avg,
 		st.insti_net_15d_sum, st.insti_net_15d_avg,
 		st.insti_net_30d_sum, st.insti_net_30d_avg,
-		p.cond_insti, p.cond_insti_bullish, p.cond_rsi, p.cond_macd,
+		p.cond_insti, p.cond_insti_buy AS cond_insti_bullish, p.cond_rsi, p.cond_macd,
 		p.cond_vol_ma10, p.cond_vol_ma20,
 		p.cond_bb_narrow, p.cond_bb_near_upper, p.cond_turnover_surge,
 		p.reasons
@@ -273,8 +277,12 @@ func getSellSummary(c *gin.Context) {
 	mode := c.DefaultQuery("mode", "sell")
 
 	rows, err := db.Pool().Query(c.Request.Context(),
-		`SELECT symbol, name, sell_count, first_date, last_date
-		 FROM alpha_sell_summary WHERE mode = $1
+		`SELECT symbol,
+		        (ARRAY_AGG(name ORDER BY trade_date DESC))[1] AS name,
+		        COUNT(*)::int AS sell_count,
+		        MIN(trade_date) AS first_date, MAX(trade_date) AS last_date
+		 FROM alpha_sell WHERE mode = $1
+		 GROUP BY symbol
 		 ORDER BY sell_count DESC`, mode)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Internal server error"})

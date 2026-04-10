@@ -14,9 +14,8 @@ func RegisterStocks(rg *gin.RouterGroup) {
 }
 
 func listStocks(c *gin.Context) {
-	query := `SELECT s.symbol, s.name, s.enabled, sh.issued_shares
-		FROM stocks s
-		LEFT JOIN tw_stock_shares sh USING (symbol)`
+	query := `SELECT s.symbol, s.name, s.enabled, s.issued_shares
+		FROM stocks s`
 
 	var args []any
 
@@ -49,9 +48,8 @@ func listStocks(c *gin.Context) {
 func getStock(c *gin.Context) {
 	symbol := c.Param("symbol")
 
-	query := `SELECT s.symbol, s.name, s.enabled, sh.issued_shares
+	query := `SELECT s.symbol, s.name, s.enabled, s.issued_shares
 		FROM stocks s
-		LEFT JOIN tw_stock_shares sh USING (symbol)
 		WHERE s.symbol = $1`
 
 	rows, err := db.Pool().Query(c.Request.Context(), query, symbol)

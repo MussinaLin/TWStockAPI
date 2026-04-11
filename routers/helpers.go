@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // rowsToMaps converts pgx rows to a slice of maps, handling type conversions
@@ -46,6 +47,15 @@ func convertValue(v any) any {
 			return nil
 		}
 		return f
+	case pgtype.Numeric:
+		f, err := val.Float64Value()
+		if err != nil || !f.Valid {
+			return nil
+		}
+		if math.IsNaN(f.Float64) || math.IsInf(f.Float64, 0) {
+			return nil
+		}
+		return f.Float64
 	default:
 		return v
 	}

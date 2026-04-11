@@ -60,7 +60,12 @@ func getTradeRecords(c *gin.Context) {
 
 	var avgPerf any
 	if perfValidCount > 0 {
-		avgPerf = math.Round(perfSum/float64(perfValidCount)*100) / 100
+		avgPerf = math.Round(perfSum/float64(perfValidCount)*10000) / 10000
+	}
+
+	var winRate any
+	if total := profitCount + lossCount; total > 0 {
+		winRate = math.Round(float64(profitCount)/float64(total)*100*10000) / 10000
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -68,6 +73,7 @@ func getTradeRecords(c *gin.Context) {
 		"profit_count":    profitCount,
 		"loss_count":      lossCount,
 		"avg_performance": avgPerf,
+		"win_rate":        winRate,
 		"records":         records,
 	})
 }

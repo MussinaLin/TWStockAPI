@@ -649,6 +649,9 @@ railway run go run .
 ```json
 {
   "count": 2,
+  "profit_count": 1,
+  "loss_count": 0,
+  "avg_performance": 5.0,
   "records": [
     {
       "symbol": "2330",
@@ -656,11 +659,19 @@ railway run go run .
       "type": "buy",
       "trade_date": "2026-03-20",
       "price": 595.0,
-      "performance": 0.05
+      "performance": 5.0
     }
   ]
 }
 ```
+
+**Summary fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `profit_count` | int | 獲利次數（`performance > 0`） |
+| `loss_count` | int | 虧損次數（`performance < 0`） |
+| `avg_performance` | float \| null | 平均獲利百分比（四捨五入至小數第二位），無有效資料時為 `null` |
 
 ---
 

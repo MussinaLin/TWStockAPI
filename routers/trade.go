@@ -2,6 +2,7 @@ package routers
 
 import (
 	"main/db"
+	"math"
 	"net/http"
 	"time"
 
@@ -39,8 +40,34 @@ func getTradeRecords(c *gin.Context) {
 	if records == nil {
 		records = []map[string]any{}
 	}
+
+	var profitCount, lossCount int
+	var perfSum float64
+	var perfValidCount int
+	for _, r := range records {
+		perf, ok := r["performance"].(float64)
+		if !ok {
+			continue
+		}
+		perfValidCount++
+		perfSum += perf
+		if perf > 0 {
+			profitCount++
+		} else if perf < 0 {
+			lossCount++
+		}
+	}
+
+	var avgPerf any
+	if perfValidCount > 0 {
+		avgPerf = math.Round(perfSum/float64(perfValidCount)*100) / 100
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"count":   len(records),
-		"records": records,
+		"count":           len(records),
+		"profit_count":    profitCount,
+		"loss_count":      lossCount,
+		"avg_performance": avgPerf,
+		"records":         records,
 	})
 }

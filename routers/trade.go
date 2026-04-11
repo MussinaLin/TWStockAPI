@@ -65,7 +65,7 @@ func getTradeRecords(c *gin.Context) {
 
 	var winRate any
 	if total := profitCount + lossCount; total > 0 {
-		winRate = math.Round(float64(profitCount)/float64(total)*100*10000) / 10000
+		winRate = math.Round(float64(profitCount)/float64(total)*10000) / 10000
 	}
 
 	c.JSON(http.StatusOK, gin.H{

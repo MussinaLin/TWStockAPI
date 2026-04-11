@@ -652,7 +652,7 @@ railway run go run .
   "profit_count": 1,
   "loss_count": 0,
   "avg_performance": 5.0000,
-  "win_rate": 100.0000,
+  "win_rate": 1.0000,
   "records": [
     {
       "symbol": "2330",
@@ -673,7 +673,7 @@ railway run go run .
 | `profit_count` | int | 獲利次數（`performance > 0`） |
 | `loss_count` | int | 虧損次數（`performance < 0`） |
 | `avg_performance` | float \| null | 平均獲利百分比（四捨五入至小數第四位），無有效資料時為 `null` |
-| `win_rate` | float \| null | 勝率百分比（`profit_count / (profit_count + loss_count) * 100`，四捨五入至小數第四位），無交易時為 `null` |
+| `win_rate` | float \| null | 勝率（`profit_count / (profit_count + loss_count)`，四捨五入至小數第四位），無交易時為 `null` |
 
 ---
 

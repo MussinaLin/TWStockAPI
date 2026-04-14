@@ -23,7 +23,7 @@ func getTradeRecords(c *gin.Context) {
 	query := `SELECT symbol, name, type, trade_date, price, performance
 		FROM trade_records
 		WHERE trade_date BETWEEN $1 AND $2
-		ORDER BY trade_date ASC, symbol`
+		ORDER BY trade_date DESC, symbol`
 
 	rows, err := db.Pool().Query(c.Request.Context(), query, fromStr, toStr)
 	if err != nil {

@@ -9,6 +9,7 @@ import (
 	"main/db"
 	"main/routers"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 
@@ -31,6 +32,11 @@ func main() {
 	r := gin.New()
 	r.Use(sloggin.New(logger))
 	r.Use(gin.Recovery())
+	r.Use(cors.New(cors.Config{
+		AllowOrigins: []string{"https://darvishkzone.com"},
+		AllowMethods: []string{"GET"},
+		AllowHeaders: []string{"Origin", "Content-Type"},
+	}))
 
 	// Health checks
 	r.GET("/health", func(c *gin.Context) {

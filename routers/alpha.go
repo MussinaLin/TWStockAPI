@@ -49,8 +49,7 @@ func getLatestPick(c *gin.Context) {
 		st.bb_bw_15d_avg, st.bb_bw_30d_avg,
 		p.cond_insti, p.cond_insti_buy AS cond_insti_bullish, p.cond_rsi, p.cond_macd,
 		p.cond_vol_ma10, p.cond_vol_ma20,
-		p.cond_bb_narrow, p.cond_bb_near_upper, p.cond_turnover_surge,
-		p.reasons
+		p.cond_bb_narrow, p.cond_bb_near_upper, p.cond_turnover_surge
 	FROM alpha_pick p
 	LEFT JOIN stock_daily_statistics st
 		ON st.symbol = p.symbol AND st.trade_date = p.trade_date
@@ -144,7 +143,7 @@ func getPickBySymbol(c *gin.Context) {
 	mode := c.DefaultQuery("mode", "alpha")
 
 	rows, err := db.Pool().Query(c.Request.Context(),
-		`SELECT trade_date, symbol, name, reasons
+		`SELECT trade_date, symbol, name
 		 FROM alpha_pick
 		 WHERE symbol = $1 AND mode = $2
 		 ORDER BY trade_date DESC`, symbol, mode)
@@ -181,8 +180,7 @@ func getPickByDate(c *gin.Context) {
 		st.insti_net_30d_sum, st.insti_net_30d_avg,
 		p.cond_insti, p.cond_insti_buy AS cond_insti_bullish, p.cond_rsi, p.cond_macd,
 		p.cond_vol_ma10, p.cond_vol_ma20,
-		p.cond_bb_narrow, p.cond_bb_near_upper, p.cond_turnover_surge,
-		p.reasons
+		p.cond_bb_narrow, p.cond_bb_near_upper, p.cond_turnover_surge
 	FROM alpha_pick p
 	LEFT JOIN stock_daily_statistics st
 		ON st.symbol = p.symbol AND st.trade_date = p.trade_date
@@ -244,7 +242,7 @@ func getLatestSell(c *gin.Context) {
 		sl.cond_bb_below, sl.cond_macd_death_cross,
 		sl.cond_margin_surge, sl.cond_turnover_surge,
 		sl.cond_vol_surge_flat,
-		sl.conditions_met, sl.reasons
+		sl.conditions_met
 	FROM alpha_sell sl
 	LEFT JOIN stock_daily_statistics st
 		ON st.symbol = sl.symbol AND st.trade_date = sl.trade_date
@@ -306,7 +304,7 @@ func getSellBySymbol(c *gin.Context) {
 	mode := c.DefaultQuery("mode", "sell")
 
 	rows, err := db.Pool().Query(c.Request.Context(),
-		`SELECT trade_date, symbol, name, reasons
+		`SELECT trade_date, symbol, name
 		 FROM alpha_sell
 		 WHERE symbol = $1 AND mode = $2
 		 ORDER BY trade_date DESC`, symbol, mode)
@@ -337,7 +335,7 @@ func getSellByDate(c *gin.Context) {
 
 	query := `SELECT symbol, trade_date, name, close, volume, vol_ma10,
 		rsi_14, macd_hist, bb_percent_b,
-		conditions_met, reasons
+		conditions_met
 	FROM alpha_sell
 	WHERE trade_date = $1 AND mode = $2
 	ORDER BY conditions_met DESC, symbol`

@@ -322,8 +322,7 @@ railway run go run .
       "cond_vol_ma20": true,
       "cond_bb_narrow": false,
       "cond_bb_near_upper": false,
-      "cond_turnover_surge": false,
-      "reasons": "法人連續買超；RSI 回升"
+      "cond_turnover_surge": false
     }
   ]
 }
@@ -396,8 +395,7 @@ railway run go run .
     {
       "trade_date": "2026-03-20",
       "symbol": "2330",
-      "name": "台積電",
-      "reasons": "法人連續買超；RSI 回升"
+      "name": "台積電"
     }
   ]
 }
@@ -449,8 +447,7 @@ railway run go run .
       "cond_vol_ma20": true,
       "cond_bb_narrow": false,
       "cond_bb_near_upper": false,
-      "cond_turnover_surge": false,
-      "reasons": "法人連續買超；RSI 回升"
+      "cond_turnover_surge": false
     }
   ]
 }
@@ -523,8 +520,7 @@ railway run go run .
       "cond_margin_surge": false,
       "cond_turnover_surge": false,
       "cond_vol_surge_flat": false,
-      "conditions_met": 5,
-      "reasons": "外資連續賣超；RSI 過熱；MACD 轉負"
+      "conditions_met": 5
     }
   ]
 }
@@ -582,8 +578,7 @@ railway run go run .
     {
       "trade_date": "2026-03-20",
       "symbol": "2330",
-      "name": "台積電",
-      "reasons": "外資連續賣超；RSI 過熱；MACD 轉負"
+      "name": "台積電"
     }
   ]
 }
@@ -620,8 +615,7 @@ railway run go run .
       "rsi_14": 78.5,
       "macd_hist": -0.15,
       "bb_percent_b": 0.92,
-      "conditions_met": 5,
-      "reasons": "外資連續賣超；RSI 過熱；MACD 轉負"
+      "conditions_met": 5
     }
   ]
 }

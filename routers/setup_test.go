@@ -103,6 +103,30 @@ func anyAlphaPickDate(t *testing.T, mode string) string {
 	return *d
 }
 
+func anyAlphaPickSymbol(t *testing.T, mode string) string {
+	t.Helper()
+	var symbol *string
+	err := db.Pool().QueryRow(context.Background(),
+		"SELECT symbol FROM alpha_pick WHERE mode = $1 LIMIT 1", mode).Scan(&symbol)
+	require.NoError(t, err)
+	if symbol == nil {
+		t.Skipf("no rows in alpha_pick for mode=%s", mode)
+	}
+	return *symbol
+}
+
+func anyAlphaSellSymbol(t *testing.T, mode string) string {
+	t.Helper()
+	var symbol *string
+	err := db.Pool().QueryRow(context.Background(),
+		"SELECT symbol FROM alpha_sell WHERE mode = $1 LIMIT 1", mode).Scan(&symbol)
+	require.NoError(t, err)
+	if symbol == nil {
+		t.Skipf("no rows in alpha_sell for mode=%s", mode)
+	}
+	return *symbol
+}
+
 func anyAlphaSellDate(t *testing.T, mode string) string {
 	t.Helper()
 	var d *string

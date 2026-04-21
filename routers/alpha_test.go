@@ -92,7 +92,7 @@ func TestGetPickSummary_OK(t *testing.T) {
 }
 
 func TestGetPickBySymbol_OK(t *testing.T) {
-	symbol := anyStockSymbol(t)
+	symbol := anyAlphaPickSymbol(t, "alpha")
 	r := newTestRouter()
 	status, body := doJSON(t, r, "GET", "/api/alpha/pick/stock/"+symbol)
 	require.Equal(t, 200, status)
@@ -107,6 +107,7 @@ func TestGetPickBySymbol_OK(t *testing.T) {
 	count, ok := m["count"].(float64)
 	require.True(t, ok)
 	assert.Equal(t, len(records), int(count))
+	require.NotEmpty(t, records, "helper returned a symbol with no records")
 
 	for i, rec := range records {
 		recm, ok := rec.(map[string]any)
@@ -246,7 +247,7 @@ func TestGetSellSummary_OK(t *testing.T) {
 }
 
 func TestGetSellBySymbol_OK(t *testing.T) {
-	symbol := anyStockSymbol(t)
+	symbol := anyAlphaSellSymbol(t, "sell")
 	r := newTestRouter()
 	status, body := doJSON(t, r, "GET", "/api/alpha/sell/stock/"+symbol)
 	require.Equal(t, 200, status)
@@ -261,6 +262,7 @@ func TestGetSellBySymbol_OK(t *testing.T) {
 	count, ok := m["count"].(float64)
 	require.True(t, ok)
 	assert.Equal(t, len(records), int(count))
+	require.NotEmpty(t, records, "helper returned a symbol with no records")
 
 	for i, rec := range records {
 		recm, ok := rec.(map[string]any)

@@ -32,17 +32,7 @@ func TestGetLatestPick_OK(t *testing.T) {
 	require.True(t, ok)
 	requireKeys(t, first,
 		"symbol", "trade_date", "name", "close", "volume",
-		"vol_ma5", "vol_ma10", "vol_ma20",
-		"rsi_14", "macd", "macd_signal", "macd_hist",
-		"bb_upper", "bb_bandwidth", "bb_percent_b",
-		"insti_net_5d_sum", "insti_net_5d_avg",
-		"insti_net_10d_sum", "insti_net_10d_avg",
-		"insti_net_15d_sum", "insti_net_15d_avg",
-		"insti_net_30d_sum", "insti_net_30d_avg",
-		"bb_bw_5d_avg", "bb_bw_10d_avg", "bb_bw_15d_avg", "bb_bw_30d_avg",
-		"cond_insti", "cond_insti_bullish", "cond_rsi", "cond_macd",
-		"cond_vol_ma10", "cond_vol_ma20",
-		"cond_bb_narrow", "cond_bb_near_upper", "cond_turnover_surge",
+		"rsi_14", "macd_hist", "bb_percent_b",
 	)
 	requireNoKey(t, first, "reasons")
 	requireDateString(t, first["trade_date"])
@@ -141,13 +131,6 @@ func TestGetPickByDate_OK(t *testing.T) {
 	requireKeys(t, first,
 		"symbol", "trade_date", "name", "close", "volume",
 		"rsi_14", "macd_hist", "bb_percent_b",
-		"insti_net_5d_sum", "insti_net_5d_avg",
-		"insti_net_10d_sum", "insti_net_10d_avg",
-		"insti_net_15d_sum", "insti_net_15d_avg",
-		"insti_net_30d_sum", "insti_net_30d_avg",
-		"cond_insti", "cond_insti_bullish", "cond_rsi", "cond_macd",
-		"cond_vol_ma10", "cond_vol_ma20",
-		"cond_bb_narrow", "cond_bb_near_upper", "cond_turnover_surge",
 	)
 	requireNoKey(t, first, "reasons")
 }
@@ -208,28 +191,10 @@ func TestGetLatestSell_OK(t *testing.T) {
 	first, ok := sells[0].(map[string]any)
 	require.True(t, ok)
 	requireKeys(t, first,
-		"symbol", "trade_date", "name", "close", "volume", "vol_ma10",
+		"symbol", "trade_date", "name", "close", "volume",
 		"rsi_14", "macd_hist", "bb_percent_b",
-		"foreign_net_5d_sum", "foreign_net_5d_avg",
-		"foreign_net_10d_sum", "foreign_net_10d_avg",
-		"foreign_net_15d_sum", "foreign_net_15d_avg",
-		"foreign_net_30d_sum", "foreign_net_30d_avg",
-		"trust_net_5d_sum", "trust_net_5d_avg",
-		"trust_net_10d_sum", "trust_net_10d_avg",
-		"trust_net_15d_sum", "trust_net_15d_avg",
-		"trust_net_30d_sum", "trust_net_30d_avg",
-		"cond_foreign_sell", "cond_foreign_accel",
-		"cond_trust_sell", "cond_trust_accel",
-		"cond_high_black", "cond_price_up_vol_down",
-		"cond_rsi_overbought", "cond_rsi_divergence",
-		"cond_macd_turn_neg", "cond_macd_divergence",
-		"cond_bb_below", "cond_macd_death_cross",
-		"cond_margin_surge", "cond_turnover_surge", "cond_vol_surge_flat",
-		"conditions_met",
 	)
 	requireNoKey(t, first, "reasons")
-	_, isFloat := first["conditions_met"].(float64)
-	assert.True(t, isFloat, "conditions_met should be a number")
 }
 
 func TestGetSellSummary_OK(t *testing.T) {
@@ -294,20 +259,8 @@ func TestGetSellByDate_OK(t *testing.T) {
 	first, ok := sells[0].(map[string]any)
 	require.True(t, ok)
 	requireKeys(t, first,
-		"symbol", "trade_date", "name", "close", "volume", "vol_ma10",
-		"rsi_14", "macd_hist", "bb_percent_b", "conditions_met",
+		"symbol", "trade_date", "name", "close", "volume",
+		"rsi_14", "macd_hist", "bb_percent_b",
 	)
 	requireNoKey(t, first, "reasons")
-
-	// sorted by conditions_met DESC
-	var prev float64 = -1
-	for i, s := range sells {
-		sm := s.(map[string]any)
-		cm, ok := sm["conditions_met"].(float64)
-		require.True(t, ok, "row %d: conditions_met not a number", i)
-		if i > 0 {
-			assert.LessOrEqual(t, cm, prev, "conditions_met should be DESC at row %d", i)
-		}
-		prev = cm
-	}
 }

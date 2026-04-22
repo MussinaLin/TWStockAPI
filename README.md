@@ -292,37 +292,9 @@ railway run go run .
       "name": "台積電",
       "close": 595.0,
       "volume": 25000000,
-      "vol_ma5": 23000000.0,
-      "vol_ma10": 22000000.0,
-      "vol_ma20": 21000000.0,
       "rsi_14": 58.3,
-      "macd": 1.25,
-      "macd_signal": 0.98,
       "macd_hist": 0.27,
-      "bb_upper": 610.0,
-      "bb_bandwidth": 6.08,
-      "bb_percent_b": 0.75,
-      "insti_net_5d_sum": 25000.0,
-      "insti_net_5d_avg": 5000.0,
-      "insti_net_10d_sum": 42000.0,
-      "insti_net_10d_avg": 4200.0,
-      "insti_net_15d_sum": 55000.0,
-      "insti_net_15d_avg": 3666.7,
-      "insti_net_30d_sum": 90000.0,
-      "insti_net_30d_avg": 3000.0,
-      "bb_bw_5d_avg": 5.8,
-      "bb_bw_10d_avg": 6.1,
-      "bb_bw_15d_avg": 6.5,
-      "bb_bw_30d_avg": 7.0,
-      "cond_insti": true,
-      "cond_insti_bullish": true,
-      "cond_rsi": true,
-      "cond_macd": false,
-      "cond_vol_ma10": true,
-      "cond_vol_ma20": true,
-      "cond_bb_narrow": false,
-      "cond_bb_near_upper": false,
-      "cond_turnover_surge": false
+      "bb_percent_b": 0.75
     }
   ]
 }
@@ -430,24 +402,7 @@ railway run go run .
       "volume": 25000000,
       "rsi_14": 58.3,
       "macd_hist": 0.27,
-      "bb_percent_b": 0.75,
-      "insti_net_5d_sum": 25000.0,
-      "insti_net_5d_avg": 5000.0,
-      "insti_net_10d_sum": 42000.0,
-      "insti_net_10d_avg": 4200.0,
-      "insti_net_15d_sum": 55000.0,
-      "insti_net_15d_avg": 3666.7,
-      "insti_net_30d_sum": 90000.0,
-      "insti_net_30d_avg": 3000.0,
-      "cond_insti": true,
-      "cond_insti_bullish": true,
-      "cond_rsi": true,
-      "cond_macd": false,
-      "cond_vol_ma10": true,
-      "cond_vol_ma20": true,
-      "cond_bb_narrow": false,
-      "cond_bb_near_upper": false,
-      "cond_turnover_surge": false
+      "bb_percent_b": 0.75
     }
   ]
 }
@@ -485,42 +440,9 @@ railway run go run .
       "name": "台積電",
       "close": 595.0,
       "volume": 25000000,
-      "vol_ma10": 22000000.0,
       "rsi_14": 78.5,
       "macd_hist": -0.15,
-      "bb_percent_b": 0.92,
-      "foreign_net_5d_sum": -12000.0,
-      "foreign_net_5d_avg": -2400.0,
-      "foreign_net_10d_sum": -18000.0,
-      "foreign_net_10d_avg": -1800.0,
-      "foreign_net_15d_sum": -20000.0,
-      "foreign_net_15d_avg": -1333.3,
-      "foreign_net_30d_sum": -25000.0,
-      "foreign_net_30d_avg": -833.3,
-      "trust_net_5d_sum": -5000.0,
-      "trust_net_5d_avg": -1000.0,
-      "trust_net_10d_sum": -8000.0,
-      "trust_net_10d_avg": -800.0,
-      "trust_net_15d_sum": -10000.0,
-      "trust_net_15d_avg": -666.7,
-      "trust_net_30d_sum": -12000.0,
-      "trust_net_30d_avg": -400.0,
-      "cond_foreign_sell": true,
-      "cond_foreign_accel": false,
-      "cond_trust_sell": true,
-      "cond_trust_accel": false,
-      "cond_high_black": false,
-      "cond_price_up_vol_down": true,
-      "cond_rsi_overbought": true,
-      "cond_rsi_divergence": false,
-      "cond_macd_turn_neg": true,
-      "cond_macd_divergence": false,
-      "cond_bb_below": false,
-      "cond_macd_death_cross": false,
-      "cond_margin_surge": false,
-      "cond_turnover_surge": false,
-      "cond_vol_surge_flat": false,
-      "conditions_met": 5
+      "bb_percent_b": 0.92
     }
   ]
 }
@@ -611,11 +533,9 @@ railway run go run .
       "name": "台積電",
       "close": 595.0,
       "volume": 25000000,
-      "vol_ma10": 22000000.0,
       "rsi_14": 78.5,
       "macd_hist": -0.15,
-      "bb_percent_b": 0.92,
-      "conditions_met": 5
+      "bb_percent_b": 0.92
     }
   ]
 }

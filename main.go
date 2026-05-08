@@ -63,5 +63,8 @@ func main() {
 
 	port := cmp.Or(os.Getenv("PORT"), "8080")
 	logger.Info("Server starting", slog.String("port", port))
-	r.Run(":" + port)
+	if err := r.Run(":" + port); err != nil {
+		logger.Error("Server failed to start", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
 }

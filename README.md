@@ -543,6 +543,86 @@ railway run go run .
 
 ---
 
+### Market Daily
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/market` | 列出大盤歷史資料（DESC by trade_date） |
+| GET | `/api/market/dates` | 列出可用大盤交易日 |
+| GET | `/api/market/:date` | 取得指定日期大盤資料 |
+
+#### `GET /api/market`
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | int | `500` | 回傳筆數上限（最大 1500） |
+
+**Response (200):**
+
+```json
+[
+  {
+    "trade_date": "2026-03-20",
+    "taiex_open": 19850.25,
+    "taiex_high": 19920.50,
+    "taiex_low": 19780.10,
+    "taiex_close": 19890.75,
+    "total_volume": 285000000000,
+    "margin_balance": 285000000000,
+    "margin_balance_change": -1500000000,
+    "foreign_net": 5800000000
+  }
+]
+```
+
+#### `GET /api/market/dates`
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | int | `500` | 回傳筆數上限（最大 1500） |
+
+**Response (200):**
+
+```json
+["2026-03-20", "2026-03-19", "2026-03-18"]
+```
+
+#### `GET /api/market/:date`
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `date` | string | 交易日期（ISO 格式 `YYYY-MM-DD`） |
+
+**Response (200):**
+
+```json
+{
+  "trade_date": "2026-03-20",
+  "taiex_open": 19850.25,
+  "taiex_high": 19920.50,
+  "taiex_low": 19780.10,
+  "taiex_close": 19890.75,
+  "total_volume": 285000000000,
+  "margin_balance": 285000000000,
+  "margin_balance_change": -1500000000,
+  "foreign_net": 5800000000
+}
+```
+
+**Response (404):**
+
+```json
+{ "error": "not found" }
+```
+
+---
+
 ### Trade Records
 
 | Method | Path | Description |

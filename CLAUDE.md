@@ -30,6 +30,7 @@ Requires `DATABASE_URL` env var (PostgreSQL connection string). Server listens o
   - `daily.go` — `/api/daily` — daily OHLCV, technical indicators, institutional flows
   - `alpha.go` — `/api/alpha/pick/*` and `/api/alpha/sell/*` — stock picking signals and sell alerts
   - `trade.go` — `/api/trade/trade-records` — trade records with date range filtering (default 90 days), includes summary stats (profit_count, loss_count, avg_performance, win_rate)
+  - `market.go` — `/api/market`, `/api/market/dates`, `/api/market/:date` — TAIEX 大盤每日資料（OHLC、總成交量、融資餘額、外資買賣超）
   - `helpers.go` — `rowsToMaps` converts pgx rows to `[]map[string]any` with type handling (dates → ISO strings, NaN/Inf → nil)
 
 All endpoints are read-only SELECT queries. Response format is JSON. Dates are returned as ISO 8601 strings.

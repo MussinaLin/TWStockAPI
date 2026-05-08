@@ -46,6 +46,7 @@ func newTestRouter() *gin.Engine {
 	RegisterDaily(api)
 	RegisterAlpha(api)
 	RegisterTrade(api)
+	RegisterMarket(api)
 	return r
 }
 

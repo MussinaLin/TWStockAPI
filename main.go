@@ -33,7 +33,7 @@ func main() {
 	r.Use(sloggin.New(logger))
 	r.Use(gin.Recovery())
 	r.Use(cors.New(cors.Config{
-		AllowOrigins: []string{"https://darvishkzone.com"},
+		AllowOrigins: []string{"https://darvishkzone.com", "https://dev.darvishkzone.com"},
 		AllowMethods: []string{"GET"},
 		AllowHeaders: []string{"Origin", "Content-Type"},
 	}))

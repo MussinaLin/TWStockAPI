@@ -60,6 +60,7 @@ func main() {
 	routers.RegisterAlpha(api)
 	routers.RegisterTrade(api)
 	routers.RegisterMarket(api)
+	routers.RegisterPeriod(api)
 
 	port := cmp.Or(os.Getenv("PORT"), "8080")
 	logger.Info("Server starting", slog.String("port", port))

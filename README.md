@@ -627,11 +627,11 @@ railway run go run .
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/period/dahu/:symbol` | 取得個股集保大戶持股歷史（weekly, ASC by trade_date） |
+| GET | `/api/period/holding/:symbol` | 取得個股集保持股比例歷史（weekly, ASC by trade_date） |
 
-#### `GET /api/period/dahu/:symbol`
+#### `GET /api/period/holding/:symbol`
 
-查詢 `stock_major_holder` 中指定股票的集保大戶持股紀錄（每週一筆），依 `trade_date` 由舊到新排序。
+查詢 `stock_holder_percent` 中指定股票的集保持股比例紀錄（每週一筆），依 `trade_date` 由舊到新排序。
 
 **Path Parameters:**
 
@@ -653,7 +653,8 @@ railway run go run .
     "symbol": "2330",
     "trade_date": "2026-04-30",
     "name": "台積電",
-    "holding_ratio": 0.8832
+    "major_ratio": 0.8832,
+    "retail_ratio": 0.1168
   }
 ]
 ```

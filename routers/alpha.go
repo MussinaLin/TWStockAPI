@@ -38,7 +38,7 @@ func getLatestPick(c *gin.Context) {
 	}
 
 	query := `SELECT symbol, trade_date, name, close, volume,
-		rsi_14, macd_hist, bb_percent_b
+		rsi_14, macd_hist, bb_percent_b, pick_type
 	FROM alpha_pick
 	WHERE trade_date = $1 AND mode = $2
 	ORDER BY symbol`
@@ -130,7 +130,7 @@ func getPickBySymbol(c *gin.Context) {
 	mode := c.DefaultQuery("mode", "alpha")
 
 	rows, err := db.Pool().Query(c.Request.Context(),
-		`SELECT trade_date, symbol, name
+		`SELECT trade_date, symbol, name, pick_type
 		 FROM alpha_pick
 		 WHERE symbol = $1 AND mode = $2
 		 ORDER BY trade_date DESC`, symbol, mode)
@@ -160,7 +160,7 @@ func getPickByDate(c *gin.Context) {
 	mode := c.DefaultQuery("mode", "alpha")
 
 	query := `SELECT symbol, trade_date, name, close, volume,
-		rsi_14, macd_hist, bb_percent_b
+		rsi_14, macd_hist, bb_percent_b, pick_type
 	FROM alpha_pick
 	WHERE trade_date = $1 AND mode = $2
 	ORDER BY symbol`

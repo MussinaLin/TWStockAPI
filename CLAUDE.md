@@ -28,7 +28,7 @@ Requires `DATABASE_URL` env var (PostgreSQL connection string). Server listens o
 - **`routers/`** — Route handlers organized by domain:
   - `stocks.go` — `/api/stocks` — stock master data
   - `daily.go` — `/api/daily` — daily OHLCV, technical indicators, institutional flows
-  - `alpha.go` — `/api/alpha/pick/*` and `/api/alpha/sell/*` — stock picking signals and sell alerts
+  - `alpha.go` — `/api/alpha/pick/*` and `/api/alpha/sell/*` — stock picking signals and sell alerts; pick responses（latest / stock/:symbol / :date）include `pick_type`（`breakout` / `dip` / `re_entry`）
   - `trade.go` — `/api/trade/trade-records` — trade records with date range filtering (default 90 days), includes summary stats (profit_count, loss_count, avg_performance, win_rate)
   - `market.go` — `/api/market`, `/api/market/dates`, `/api/market/:date` — TAIEX 大盤每日資料（OHLC、總成交量、融資餘額、外資買賣超）
   - `period.go` — `/api/period/holding/:symbol` — 集保持股比例（stock_holder_percent, weekly）；回傳 major_ratio（大戶比例）、retail_ratio（散戶比例）；支援 `?limit`，未帶 limit 時回傳全部

@@ -294,7 +294,8 @@ railway run go run .
       "volume": 25000000,
       "rsi_14": 58.3,
       "macd_hist": 0.27,
-      "bb_percent_b": 0.75
+      "bb_percent_b": 0.75,
+      "pick_type": "breakout"
     }
   ]
 }
@@ -367,7 +368,8 @@ railway run go run .
     {
       "trade_date": "2026-03-20",
       "symbol": "2330",
-      "name": "台積電"
+      "name": "台積電",
+      "pick_type": "breakout"
     }
   ]
 }
@@ -402,7 +404,8 @@ railway run go run .
       "volume": 25000000,
       "rsi_14": 58.3,
       "macd_hist": 0.27,
-      "bb_percent_b": 0.75
+      "bb_percent_b": 0.75,
+      "pick_type": "breakout"
     }
   ]
 }

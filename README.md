@@ -170,6 +170,8 @@ railway run go run .
     "high": 598.0,
     "low": 588.0,
     "volume": 25000000,
+    "price_limit_up": false,
+    "price_limit_down": false,
     "turnover_rate": 0.0012,
     "foreign_net": 5000.0,
     "trust_net": 1200.0,
@@ -202,6 +204,13 @@ railway run go run .
 ]
 ```
 
+**欄位說明：**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `price_limit_up` | bool | 是否漲停（`close` = `limit_up`）。無漲跌停資料時回 `false` |
+| `price_limit_down` | bool | 是否跌停（`close` = `limit_down`）。無漲跌停資料時回 `false` |
+
 #### `GET /api/daily/stock/:symbol`
 
 **Path Parameters:**
@@ -229,6 +238,8 @@ railway run go run .
     "high": 598.0,
     "low": 588.0,
     "volume": 25000000,
+    "price_limit_up": false,
+    "price_limit_down": false,
     "turnover_rate": 0.0012,
     "foreign_net": 5000.0,
     "trust_net": 1200.0,

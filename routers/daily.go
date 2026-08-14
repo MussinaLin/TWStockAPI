@@ -48,6 +48,8 @@ func listDailyDates(c *gin.Context) {
 }
 
 const dailyColumns = `r.symbol, r.name, r.open, r.close, r.high, r.low, r.volume,
+	COALESCE(r.close = r.limit_up, false) AS price_limit_up,
+	COALESCE(r.close = r.limit_down, false) AS price_limit_down,
 	r.turnover_rate, r.foreign_net, r.trust_net, r.dealer_net,
 	r.institutional_investors_net,
 	r.margin_balance, r.short_balance, r.short_margin_ratio,
@@ -93,6 +95,8 @@ func getStockHistory(c *gin.Context) {
 	limit := parseLimit(c, 60, 365)
 
 	historyColumns := `r.trade_date, r.open, r.close, r.high, r.low, r.volume,
+		COALESCE(r.close = r.limit_up, false) AS price_limit_up,
+		COALESCE(r.close = r.limit_down, false) AS price_limit_down,
 		r.turnover_rate, r.foreign_net, r.trust_net, r.dealer_net,
 		r.institutional_investors_net,
 		r.margin_balance, r.short_balance, r.short_margin_ratio,

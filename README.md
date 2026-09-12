@@ -79,6 +79,8 @@ UPDATE config SET value = 'true', updated_time = now() WHERE key = 'JWT_TOKEN_EN
 
 第一次設定時執行 `db/config.sql` 建立這一列（預設 `false`）。
 
+前端串接方式（如何在 request 帶 token、401 處理、CORS）見 [docs/frontend-api-auth-integration.md](docs/frontend-api-auth-integration.md)。
+
 ---
 
 ## API Endpoints

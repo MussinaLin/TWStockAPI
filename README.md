@@ -28,6 +28,12 @@ cp .env.example .env
 
 確保 `DATABASE_URL` 指向與 TWStockAnalysis 相同的 PostgreSQL。
 
+| 環境變數 | 必填 | 說明 |
+|----------|------|------|
+| `DATABASE_URL` | 是 | PostgreSQL 連線字串 |
+| `JWT_SECRET` | 啟用 JWT 驗證時必填 | 驗證 JWT 的密鑰，必須與 AccountService 的 `JWT_SECRET` 相同 |
+| `PORT` | 否 | 服務 port，預設 `8080` |
+
 ## 啟動
 
 ```bash
@@ -37,6 +43,41 @@ go run .
 # 透過 Railway
 railway run go run .
 ```
+
+---
+
+## 認證
+
+`/api/*` 前面有 JWT 驗證 middleware，是否啟用由 DB `config` 表的 `JWT_TOKEN_ENABLE` 決定。`/health`、`/health/db` 永遠不驗證。
+
+| `JWT_TOKEN_ENABLE` | 行為 |
+|--------------------|------|
+| `false`（預設；沒有這一列也視為 `false`） | 不驗證，不帶 token 也能存取 |
+| `true`（不分大小寫） | 必須帶 AccountService 簽發的 JWT |
+
+啟用時，每個 request 需帶：
+
+```
+Authorization: Bearer <AccountService 回傳的 token>
+```
+
+Token 的 `sub`（使用者 id）必須存在於 `users` 表。
+
+**驗證失敗回應：**
+
+| HTTP | Body | 意義 |
+|------|------|------|
+| `401` | `{"error":"token expired"}` | Token 已過期，請重新登入 |
+| `401` | `{"error":"unauthorized"}` | 沒帶 token、格式錯誤、簽章無效，或使用者不存在 |
+| `500` | `{"detail":"Internal server error"}` | 讀取設定或使用者時 DB 出錯，或伺服器沒有設定 `JWT_SECRET` |
+
+**切換開關**（60 秒內生效，不需重新部署）：
+
+```sql
+UPDATE config SET value = 'true', updated_time = now() WHERE key = 'JWT_TOKEN_ENABLE';
+```
+
+第一次設定時執行 `db/config.sql` 建立這一列（預設 `false`）。
 
 ---
 
@@ -734,3 +775,5 @@ railway run go run .
 ```
 
 HTTP Status Code: `500`
+
+啟用 JWT 驗證時，驗證失敗回傳 `401`，詳見[認證](#認證)。

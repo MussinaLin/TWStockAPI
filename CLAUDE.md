@@ -19,12 +19,16 @@ railway run go run .
 go build -o server .
 ```
 
-Requires `DATABASE_URL` env var (PostgreSQL connection string). Server listens on `PORT` (default `8080`).
+Requires `DATABASE_URL` env var (PostgreSQL connection string). Server listens on `PORT` (default `8080`). `JWT_SECRET`（必須與 AccountService 相同）只有在啟用 JWT 驗證時才需要；沒設時啟動只會記 warning。
 
 ## Architecture
 
-- **`main.go`** — App entry point: loads `.env`, inits DB pool, registers middleware (`slog-gin`, `gin.Recovery`), mounts health checks and API route groups.
+- **`main.go`** — App entry point: loads `.env`, inits DB pool, registers middleware (`slog-gin`, `gin.Recovery`, CORS allowing `Authorization`), mounts health checks and API route groups; the `/api` group runs `auth.RequireAuth`.
 - **`db/db.go`** — PostgreSQL connection pool via `pgxpool` (min 2, max 10 connections).
+- **`auth/`** — JWT 驗證 filter，掛在 `/api` group（`/health*` 不驗證）。開關為 DB `config` 表的 `JWT_TOKEN_ENABLE`（值為 `'true'` 才啟用；沒有這一列視為 false；60 秒記憶體快取）。`db/config.sql` 建立這一列（預設 `false`）。
+  - 啟用時需帶 `Authorization: Bearer <jwt>`（AccountService 簽發，HS256，`JWT_SECRET` 須相同）。`sub` = `users.id`，查 `users` 表取得 email，以 `auth.User{ID, Email}` 存入 `gin.Context`（key `auth.ContextUserKey`）。
+  - 過期回 401 `{"error":"token expired"}`；其他驗證失敗回 401 `{"error":"unauthorized"}`；讀 config / users 出錯或未設 `JWT_SECRET` 回 500。
+  - `jwt.go`（`ParseToken`）、`flag.go`（`FlagCache`、`LoadJWTFlag`）、`user.go`（`PgxUserStore`）、`middleware.go`（`RequireAuth`）。
 - **`routers/`** — Route handlers organized by domain:
   - `stocks.go` — `/api/stocks` — stock master data
   - `daily.go` — `/api/daily` — daily OHLCV, technical indicators, institutional flows；`/api/daily/:date` 與 `/api/daily/stock/:symbol` 回應含 `price_limit_up` / `price_limit_down`（bool，`close` 是否等於 `stock_daily_raw.limit_up` / `limit_down`；欄位為 NULL 時回 `false`）

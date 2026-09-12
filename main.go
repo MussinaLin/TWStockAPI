@@ -5,7 +5,9 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
+	"main/auth"
 	"main/db"
 	"main/routers"
 
@@ -27,6 +29,11 @@ func main() {
 	}
 	defer db.ClosePool()
 
+	jwtSecret := []byte(os.Getenv("JWT_SECRET"))
+	if len(jwtSecret) == 0 {
+		logger.Warn("JWT_SECRET is not set; /api requests will fail with 500 if JWT_TOKEN_ENABLE is turned on")
+	}
+
 	gin.SetMode(gin.ReleaseMode)
 
 	r := gin.New()
@@ -35,7 +42,7 @@ func main() {
 	r.Use(cors.New(cors.Config{
 		AllowOrigins: []string{"https://darvishkzone.com", "https://dev.darvishkzone.com"},
 		AllowMethods: []string{"GET"},
-		AllowHeaders: []string{"Origin", "Content-Type"},
+		AllowHeaders: []string{"Origin", "Content-Type", "Authorization"},
 	}))
 
 	// Health checks
@@ -53,8 +60,9 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	// API routes
-	api := r.Group("/api")
+	// API routes — JWT verification is toggled by config.JWT_TOKEN_ENABLE
+	flags := auth.NewFlagCache(auth.LoadJWTFlag, time.Minute)
+	api := r.Group("/api", auth.RequireAuth(flags, auth.PgxUserStore{}, jwtSecret))
 	routers.RegisterStocks(api)
 	routers.RegisterDaily(api)
 	routers.RegisterAlpha(api)

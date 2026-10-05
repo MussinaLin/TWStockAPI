@@ -739,6 +739,8 @@ UPDATE user_config SET value = '{"0": 10, "1": 15, "2": 20}', updated_time = now
 WHERE key = 'FAVORITE_STOCKS_LIMIT';
 ```
 
+前端串接方式見 [docs/frontend-favorites-integration.md](docs/frontend-favorites-integration.md)。
+
 第一次部署前執行 `db/user_favorites.sql`，建立 `user_config`、`user_favorite_stocks` 兩張表與上限的初始設定。找不到設定或找不到該 level 的上限時，GET / POST 回 `500`。
 
 #### `GET /api/favorites`

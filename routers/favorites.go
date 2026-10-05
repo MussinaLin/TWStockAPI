@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"main/auth"
@@ -25,6 +26,7 @@ const favoriteLimitKey = "FAVORITE_STOCKS_LIMIT"
 func RegisterFavorites(rg *gin.RouterGroup, requireLogin gin.HandlerFunc) {
 	g := rg.Group("/favorites", requireLogin)
 	g.GET("", listFavorites)
+	g.POST("", addFavorite)
 	g.DELETE("/:symbol", deleteFavorite)
 }
 
@@ -86,6 +88,110 @@ func listFavorites(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"limit": limit, "count": len(items), "items": items})
+}
+
+type addFavoriteRequest struct {
+	Symbol string `json:"symbol"`
+}
+
+// addFavorite 新增一檔我的最愛。整個流程在同一個 transaction 裡，先以 FOR UPDATE
+// 鎖住 user 的 row，讓同一個 user 的請求排隊處理，避免同時送出時超過上限。
+func addFavorite(c *gin.Context) {
+	user, ok := auth.CurrentUser(c)
+	if !ok {
+		favoritesServerError(c, errors.New("favorites: no authenticated user"))
+		return
+	}
+
+	var req addFavoriteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	symbol := strings.TrimSpace(req.Symbol)
+	if symbol == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+
+	ctx := c.Request.Context()
+	tx, err := db.Pool().Begin(ctx)
+	if err != nil {
+		favoritesServerError(c, fmt.Errorf("favorites: begin: %w", err))
+		return
+	}
+	defer tx.Rollback(ctx) // 已 Commit 時為 no-op
+
+	var level int
+	err = tx.QueryRow(ctx,
+		"SELECT member_level FROM users WHERE id = $1::uuid FOR UPDATE", user.ID).Scan(&level)
+	if errors.Is(err, pgx.ErrNoRows) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	if err != nil {
+		favoritesServerError(c, fmt.Errorf("favorites: lock user: %w", err))
+		return
+	}
+
+	var existing favoriteItem
+	err = tx.QueryRow(ctx,
+		`SELECT f.symbol, s.name, f.created_time
+		FROM user_favorite_stocks f
+		JOIN stocks s ON s.symbol = f.symbol
+		WHERE f.user_id = $1::uuid AND f.symbol = $2`,
+		user.ID, symbol).Scan(&existing.Symbol, &existing.Name, &existing.CreatedTime)
+	if err == nil {
+		c.JSON(http.StatusOK, existing)
+		return
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		favoritesServerError(c, fmt.Errorf("favorites: find existing: %w", err))
+		return
+	}
+
+	item := favoriteItem{Symbol: symbol}
+	err = tx.QueryRow(ctx,
+		"SELECT name FROM stocks WHERE symbol = $1 AND enabled", symbol).Scan(&item.Name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "stock not found"})
+		return
+	}
+	if err != nil {
+		favoritesServerError(c, fmt.Errorf("favorites: find stock: %w", err))
+		return
+	}
+
+	limit, err := loadFavoriteLimit(ctx, tx, level)
+	if err != nil {
+		favoritesServerError(c, err)
+		return
+	}
+
+	var count int
+	err = tx.QueryRow(ctx,
+		"SELECT COUNT(*) FROM user_favorite_stocks WHERE user_id = $1::uuid", user.ID).Scan(&count)
+	if err != nil {
+		favoritesServerError(c, fmt.Errorf("favorites: count: %w", err))
+		return
+	}
+	if count >= limit {
+		c.JSON(http.StatusConflict, gin.H{"error": "favorite limit reached", "limit": limit})
+		return
+	}
+
+	err = tx.QueryRow(ctx,
+		"INSERT INTO user_favorite_stocks (user_id, symbol) VALUES ($1::uuid, $2) RETURNING created_time",
+		user.ID, symbol).Scan(&item.CreatedTime)
+	if err != nil {
+		favoritesServerError(c, fmt.Errorf("favorites: insert: %w", err))
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		favoritesServerError(c, fmt.Errorf("favorites: commit: %w", err))
+		return
+	}
+	c.JSON(http.StatusCreated, item)
 }
 
 // deleteFavorite 移除一檔我的最愛；不論原本是否存在都回 204。

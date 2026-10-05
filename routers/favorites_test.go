@@ -2,7 +2,11 @@ package routers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -202,4 +206,160 @@ func TestDeleteFavorite_OnlyOwn(t *testing.T) {
 	status, _ := doJSON(t, newFavoritesRouter(other), "DELETE", "/api/favorites/"+symbols[0])
 	assert.Equal(t, 204, status)
 	assert.Equal(t, 1, favoriteCount(t, owner))
+}
+
+// doJSONBody is doJSON with a JSON request body.
+func doJSONBody(t *testing.T, r *gin.Engine, method, path, body string) (int, any) {
+	t.Helper()
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	var decoded any
+	if w.Body.Len() > 0 {
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &decoded), "decode body: %s", w.Body.String())
+	}
+	return w.Code, decoded
+}
+
+// ── POST /api/favorites ──
+
+func TestAddFavorite_CreatedThenIdempotent(t *testing.T) {
+	symbol := enabledSymbols(t, 1)[0]
+	userID := newFavoritesUser(t, 0)
+	r := newFavoritesRouter(userID)
+
+	status, body := doJSONBody(t, r, "POST", "/api/favorites", `{"symbol":"`+symbol+`"}`)
+	require.Equal(t, 201, status, "body: %v", body)
+	created := body.(map[string]any)
+	requireKeys(t, created, "symbol", "name", "created_time")
+	assert.Equal(t, symbol, created["symbol"])
+	_, err := time.Parse(time.RFC3339Nano, created["created_time"].(string))
+	assert.NoError(t, err)
+
+	status, body = doJSONBody(t, r, "POST", "/api/favorites", `{"symbol":"`+symbol+`"}`)
+	require.Equal(t, 200, status)
+	assert.Equal(t, created, body)
+	assert.Equal(t, 1, favoriteCount(t, userID))
+}
+
+func TestAddFavorite_TrimsSymbol(t *testing.T) {
+	symbol := enabledSymbols(t, 1)[0]
+	userID := newFavoritesUser(t, 0)
+
+	status, body := doJSONBody(t, newFavoritesRouter(userID), "POST", "/api/favorites", `{"symbol":"  `+symbol+` "}`)
+	require.Equal(t, 201, status, "body: %v", body)
+	assert.Equal(t, symbol, body.(map[string]any)["symbol"])
+}
+
+func TestAddFavorite_InvalidRequest(t *testing.T) {
+	userID := newFavoritesUser(t, 0)
+	r := newFavoritesRouter(userID)
+	cases := map[string]string{
+		"invalid json":     `{`,
+		"empty body":       ``,
+		"missing symbol":   `{}`,
+		"blank symbol":     `{"symbol":"   "}`,
+		"non-string value": `{"symbol":2330}`,
+	}
+	for name, payload := range cases {
+		t.Run(name, func(t *testing.T) {
+			status, body := doJSONBody(t, r, "POST", "/api/favorites", payload)
+			assert.Equal(t, 400, status)
+			assert.Equal(t, map[string]any{"error": "invalid request"}, body)
+		})
+	}
+}
+
+func TestAddFavorite_StockNotFound(t *testing.T) {
+	userID := newFavoritesUser(t, 0)
+	r := newFavoritesRouter(userID)
+	cases := map[string]string{
+		"unknown":  "__NOPE__",
+		"overlong": "12345678901234567890",
+	}
+	for name, symbol := range cases {
+		t.Run(name, func(t *testing.T) {
+			status, body := doJSONBody(t, r, "POST", "/api/favorites", `{"symbol":"`+symbol+`"}`)
+			assert.Equal(t, 404, status)
+			assert.Equal(t, map[string]any{"error": "stock not found"}, body)
+		})
+	}
+	assert.Equal(t, 0, favoriteCount(t, userID))
+}
+
+func TestAddFavorite_DisabledStock(t *testing.T) {
+	symbol := disabledSymbol(t)
+	userID := newFavoritesUser(t, 0)
+
+	status, body := doJSONBody(t, newFavoritesRouter(userID), "POST", "/api/favorites", `{"symbol":"`+symbol+`"}`)
+	assert.Equal(t, 404, status)
+	assert.Equal(t, map[string]any{"error": "stock not found"}, body)
+}
+
+func TestAddFavorite_LimitReached(t *testing.T) {
+	limit := favoriteLimitFor(t, 0)
+	symbols := enabledSymbols(t, limit+1)
+	userID := newFavoritesUser(t, 0)
+	for _, s := range symbols[:limit] {
+		addFavoriteRow(t, userID, s, time.Now())
+	}
+	r := newFavoritesRouter(userID)
+
+	// 已經在清單中的股票，即使已額滿也回 200
+	status, _ := doJSONBody(t, r, "POST", "/api/favorites", `{"symbol":"`+symbols[0]+`"}`)
+	assert.Equal(t, 200, status)
+
+	status, body := doJSONBody(t, r, "POST", "/api/favorites", `{"symbol":"`+symbols[limit]+`"}`)
+	assert.Equal(t, 409, status)
+	assert.Equal(t, map[string]any{"error": "favorite limit reached", "limit": float64(limit)}, body)
+	assert.Equal(t, limit, favoriteCount(t, userID))
+}
+
+func TestAddFavorite_ConcurrentRequestsRespectLimit(t *testing.T) {
+	limit := favoriteLimitFor(t, 0)
+	symbols := enabledSymbols(t, limit+5)
+	userID := newFavoritesUser(t, 0)
+	r := newFavoritesRouter(userID)
+
+	codes := make([]int, len(symbols))
+	var wg sync.WaitGroup
+	for i, s := range symbols {
+		wg.Add(1)
+		go func(i int, s string) {
+			defer wg.Done()
+			req := httptest.NewRequest("POST", "/api/favorites", strings.NewReader(`{"symbol":"`+s+`"}`))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			codes[i] = w.Code
+		}(i, s)
+	}
+	wg.Wait()
+
+	counts := map[int]int{}
+	for _, c := range codes {
+		counts[c]++
+	}
+	assert.Equal(t, map[int]int{201: limit, 409: 5}, counts)
+	assert.Equal(t, limit, favoriteCount(t, userID))
+}
+
+func TestAddFavorite_UnknownLevel(t *testing.T) {
+	symbol := enabledSymbols(t, 1)[0]
+	userID := newFavoritesUser(t, 99)
+
+	status, body := doJSONBody(t, newFavoritesRouter(userID), "POST", "/api/favorites", `{"symbol":"`+symbol+`"}`)
+	assert.Equal(t, 500, status)
+	assert.Equal(t, map[string]any{"detail": "Internal server error"}, body)
+	assert.Equal(t, 0, favoriteCount(t, userID))
+}
+
+func TestAddFavorite_UserGone(t *testing.T) {
+	symbol := enabledSymbols(t, 1)[0]
+
+	status, body := doJSONBody(t, newFavoritesRouter(uuid.NewString()), "POST", "/api/favorites", `{"symbol":"`+symbol+`"}`)
+	assert.Equal(t, 401, status)
+	assert.Equal(t, map[string]any{"error": "unauthorized"}, body)
 }

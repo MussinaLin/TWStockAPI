@@ -31,7 +31,7 @@ cp .env.example .env
 | 環境變數 | 必填 | 說明 |
 |----------|------|------|
 | `DATABASE_URL` | 是 | PostgreSQL 連線字串 |
-| `JWT_SECRET` | 啟用 JWT 驗證時必填 | 驗證 JWT 的密鑰，必須與 AccountService 的 `JWT_SECRET` 相同 |
+| `JWT_SECRET` | 是（`/api/favorites` 一律需要；其他 `/api` 在啟用 JWT 驗證時需要） | 驗證 JWT 的密鑰，必須與 AccountService 的 `JWT_SECRET` 相同 |
 | `PORT` | 否 | 服務 port，預設 `8080` |
 
 ## 啟動
@@ -841,4 +841,4 @@ WHERE key = 'FAVORITE_STOCKS_LIMIT';
 
 HTTP Status Code: `500`
 
-啟用 JWT 驗證時，驗證失敗回傳 `401`，詳見[認證](#認證)。
+啟用 JWT 驗證時，驗證失敗回傳 `401`，詳見[認證](#認證)。`/api/favorites/*` 不論開關一律驗證，驗證失敗同樣回 `401`。

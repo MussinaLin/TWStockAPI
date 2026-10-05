@@ -19,7 +19,7 @@ railway run go run .
 go build -o server .
 ```
 
-Requires `DATABASE_URL` env var (PostgreSQL connection string). Server listens on `PORT` (default `8080`). `JWT_SECRET`（必須與 AccountService 相同）只有在啟用 JWT 驗證時才需要；沒設時啟動只會記 warning。
+Requires `DATABASE_URL` env var (PostgreSQL connection string). Server listens on `PORT` (default `8080`). `JWT_SECRET`（必須與 AccountService 相同）：`/api/favorites` 一律需要，其他 `/api` 在啟用 JWT 驗證時才需要；沒設時啟動只會記 warning，`/api/favorites` 會一律回 500。
 
 ## Architecture
 

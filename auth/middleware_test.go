@@ -48,17 +48,24 @@ func knownUsers() *fakeUsers {
 	}}
 }
 
-// serve sends one GET /api/ping through RequireAuth. The handler echoes the
-// authenticated user's email so tests can see what reached the context.
+// serve sends one GET /api/ping through RequireAuth.
 func serve(t *testing.T, flags FlagSource, users UserStore, secret []byte, authHeader string) (int, map[string]any) {
+	t.Helper()
+	return serveWith(t, authHeader, RequireAuth(flags, users, secret))
+}
+
+// serveWith sends one GET /api/ping through the given middleware chain. The
+// handler echoes the authenticated user's email so tests can see what reached
+// the context.
+func serveWith(t *testing.T, authHeader string, chain ...gin.HandlerFunc) (int, map[string]any) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	api := r.Group("/api", RequireAuth(flags, users, secret))
+	api := r.Group("/api", chain...)
 	api.GET("/ping", func(c *gin.Context) {
 		body := gin.H{"ok": true}
-		if u, exists := c.Get(ContextUserKey); exists {
-			body["email"] = u.(User).Email
+		if u, ok := CurrentUser(c); ok {
+			body["email"] = u.Email
 		}
 		c.JSON(http.StatusOK, body)
 	})
@@ -165,4 +172,110 @@ func TestRequireAuthServerErrors(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, code)
 		assert.Equal(t, serverError, body)
 	})
+}
+
+// presetUser simulates RequireAuth having already authenticated the request.
+func presetUser(u User) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Set(ContextUserKey, u)
+		c.Next()
+	}
+}
+
+func TestRequireLoginValidTokenSetsUser(t *testing.T) {
+	users := knownUsers()
+	code, body := serveWith(t, bearer(t, testUserID, time.Hour), RequireLogin(users, testSecret))
+
+	assert.Equal(t, http.StatusOK, code)
+	assert.Equal(t, "user@example.com", body["email"])
+	assert.Equal(t, 1, users.calls)
+}
+
+func TestRequireLoginExpiredToken(t *testing.T) {
+	code, body := serveWith(t, bearer(t, testUserID, -time.Hour), RequireLogin(knownUsers(), testSecret))
+
+	assert.Equal(t, http.StatusUnauthorized, code)
+	assert.Equal(t, map[string]any{"error": "token expired"}, body)
+}
+
+func TestRequireLoginUnauthorized(t *testing.T) {
+	cases := map[string]string{
+		"missing header":   "",
+		"garbage token":    "Bearer garbage",
+		"bad signature":    "Bearer " + signToken(t, jwt.SigningMethodHS256, []byte("other-secret"), validClaims(testUserID, time.Hour)),
+		"unknown user":     bearer(t, "00000000-0000-0000-0000-000000000000", time.Hour),
+		"non-uuid subject": bearer(t, "not-a-uuid", time.Hour),
+	}
+	for name, header := range cases {
+		t.Run(name, func(t *testing.T) {
+			code, body := serveWith(t, header, RequireLogin(knownUsers(), testSecret))
+			assert.Equal(t, http.StatusUnauthorized, code)
+			assert.Equal(t, map[string]any{"error": "unauthorized"}, body)
+		})
+	}
+}
+
+func TestRequireLoginSkipsLookupWhenUserPresent(t *testing.T) {
+	users := knownUsers()
+	preset := User{ID: testUserID, Email: "preset@example.com"}
+	code, body := serveWith(t, "", presetUser(preset), RequireLogin(users, testSecret))
+
+	assert.Equal(t, http.StatusOK, code)
+	assert.Equal(t, "preset@example.com", body["email"])
+	assert.Zero(t, users.calls)
+}
+
+func TestRequireLoginServerErrors(t *testing.T) {
+	serverError := map[string]any{"detail": "Internal server error"}
+
+	t.Run("secret not set", func(t *testing.T) {
+		code, body := serveWith(t, bearer(t, testUserID, time.Hour), RequireLogin(knownUsers(), nil))
+		assert.Equal(t, http.StatusInternalServerError, code)
+		assert.Equal(t, serverError, body)
+	})
+
+	t.Run("user lookup fails", func(t *testing.T) {
+		users := &fakeUsers{err: errors.New("db down")}
+		code, body := serveWith(t, bearer(t, testUserID, time.Hour), RequireLogin(users, testSecret))
+		assert.Equal(t, http.StatusInternalServerError, code)
+		assert.Equal(t, serverError, body)
+	})
+}
+
+// RequireLogin must enforce login even while JWT_TOKEN_ENABLE is off, and must
+// not look the user up a second time when RequireAuth already did.
+func TestRequireLoginBehindRequireAuth(t *testing.T) {
+	t.Run("flag off, no token", func(t *testing.T) {
+		users := knownUsers()
+		code, body := serveWith(t, "",
+			RequireAuth(fakeFlags{enabled: false}, users, testSecret), RequireLogin(users, testSecret))
+		assert.Equal(t, http.StatusUnauthorized, code)
+		assert.Equal(t, map[string]any{"error": "unauthorized"}, body)
+	})
+
+	t.Run("flag off, valid token", func(t *testing.T) {
+		users := knownUsers()
+		code, body := serveWith(t, bearer(t, testUserID, time.Hour),
+			RequireAuth(fakeFlags{enabled: false}, users, testSecret), RequireLogin(users, testSecret))
+		assert.Equal(t, http.StatusOK, code)
+		assert.Equal(t, "user@example.com", body["email"])
+		assert.Equal(t, 1, users.calls)
+	})
+
+	t.Run("flag on, valid token", func(t *testing.T) {
+		users := knownUsers()
+		code, body := serveWith(t, bearer(t, testUserID, time.Hour),
+			RequireAuth(fakeFlags{enabled: true}, users, testSecret), RequireLogin(users, testSecret))
+		assert.Equal(t, http.StatusOK, code)
+		assert.Equal(t, "user@example.com", body["email"])
+		assert.Equal(t, 1, users.calls)
+	})
+}
+
+func TestCurrentUserMissing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	_, ok := CurrentUser(c)
+	assert.False(t, ok)
 }

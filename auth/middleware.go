@@ -18,9 +18,7 @@ const ContextUserKey = "authUser"
 // While the flag is off, requests pass through without reading Authorization.
 func RequireAuth(flags FlagSource, users UserStore, secret []byte) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		ctx := c.Request.Context()
-
-		enabled, err := flags.Enabled(ctx)
+		enabled, err := flags.Enabled(c.Request.Context())
 		if err != nil {
 			abortServerError(c, fmt.Errorf("auth: load %s: %w", FlagKey, err))
 			return
@@ -29,48 +27,80 @@ func RequireAuth(flags FlagSource, users UserStore, secret []byte) gin.HandlerFu
 			c.Next()
 			return
 		}
-
-		if len(secret) == 0 {
-			abortServerError(c, errors.New("auth: JWT_SECRET is not set"))
-			return
+		if authenticate(c, users, secret) {
+			c.Next()
 		}
-
-		tokenStr, ok := bearerToken(c.GetHeader("Authorization"))
-		if !ok {
-			abortUnauthorized(c, errors.New("auth: missing bearer token"))
-			return
-		}
-
-		sub, err := ParseToken(secret, tokenStr)
-		if errors.Is(err, ErrTokenExpired) {
-			_ = c.Error(fmt.Errorf("auth: %w", err))
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token expired"})
-			return
-		}
-		if err != nil {
-			abortUnauthorized(c, fmt.Errorf("auth: %w", err))
-			return
-		}
-
-		id, err := uuid.Parse(sub)
-		if err != nil {
-			abortUnauthorized(c, errors.New("auth: subject is not a uuid"))
-			return
-		}
-
-		user, err := users.GetByID(ctx, id.String())
-		if errors.Is(err, ErrUserNotFound) {
-			abortUnauthorized(c, fmt.Errorf("auth: %w", err))
-			return
-		}
-		if err != nil {
-			abortServerError(c, fmt.Errorf("auth: lookup user: %w", err))
-			return
-		}
-
-		c.Set(ContextUserKey, user)
-		c.Next()
 	}
+}
+
+// RequireLogin returns middleware that always requires a valid AccountService
+// Bearer JWT, regardless of JWT_TOKEN_ENABLE. If RequireAuth already
+// authenticated the request, it passes through without looking the user up again.
+func RequireLogin(users UserStore, secret []byte) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if _, ok := CurrentUser(c); ok {
+			c.Next()
+			return
+		}
+		if authenticate(c, users, secret) {
+			c.Next()
+		}
+	}
+}
+
+// CurrentUser returns the User stored by RequireAuth or RequireLogin.
+func CurrentUser(c *gin.Context) (User, bool) {
+	v, ok := c.Get(ContextUserKey)
+	if !ok {
+		return User{}, false
+	}
+	u, ok := v.(User)
+	return u, ok
+}
+
+// authenticate verifies the Bearer JWT and stores the matching User in the
+// context. On failure it aborts with the error response and returns false.
+func authenticate(c *gin.Context, users UserStore, secret []byte) bool {
+	if len(secret) == 0 {
+		abortServerError(c, errors.New("auth: JWT_SECRET is not set"))
+		return false
+	}
+
+	tokenStr, ok := bearerToken(c.GetHeader("Authorization"))
+	if !ok {
+		abortUnauthorized(c, errors.New("auth: missing bearer token"))
+		return false
+	}
+
+	sub, err := ParseToken(secret, tokenStr)
+	if errors.Is(err, ErrTokenExpired) {
+		_ = c.Error(fmt.Errorf("auth: %w", err))
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token expired"})
+		return false
+	}
+	if err != nil {
+		abortUnauthorized(c, fmt.Errorf("auth: %w", err))
+		return false
+	}
+
+	id, err := uuid.Parse(sub)
+	if err != nil {
+		abortUnauthorized(c, errors.New("auth: subject is not a uuid"))
+		return false
+	}
+
+	user, err := users.GetByID(c.Request.Context(), id.String())
+	if errors.Is(err, ErrUserNotFound) {
+		abortUnauthorized(c, fmt.Errorf("auth: %w", err))
+		return false
+	}
+	if err != nil {
+		abortServerError(c, fmt.Errorf("auth: lookup user: %w", err))
+		return false
+	}
+
+	c.Set(ContextUserKey, user)
+	return true
 }
 
 // bearerToken extracts the token from an "Authorization: Bearer <token>" header.

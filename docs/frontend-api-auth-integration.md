@@ -186,7 +186,7 @@ TWStockAPI 目前允許的跨域設定：
 | 項目 | 值 |
 |------|----|
 | Origins | `https://darvishkzone.com`、`https://dev.darvishkzone.com` |
-| Methods | `GET` |
+| Methods | `GET`、`POST`、`DELETE` |
 | Headers | `Origin`、`Content-Type`、`Authorization` |
 
 - 帶 `Authorization` header 時，瀏覽器會先送一個 `OPTIONS` preflight，後端回 `204` 屬正常現象。
@@ -248,3 +248,5 @@ curl -H "Authorization: Bearer <token>" https://twstockapi-staging.up.railway.ap
 ## 9. 後端開關（參考）
 
 後端可以用 DB `config` 表的 `JWT_TOKEN_ENABLE` 開關驗證；關閉時不檢查 token。前端**一律照常帶 token** 即可，開關切換不需要改前端。目前 staging 已啟用驗證。
+
+**例外：`/api/favorites/*`（我的最愛）一律需要 token**，即使開關關閉也一樣；沒帶或 token 無效時回 `401`，處理方式同 §5。API 規格見 TWStockAPI `README.md` 的 Favorites 段落。

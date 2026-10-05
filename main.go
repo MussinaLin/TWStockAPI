@@ -41,7 +41,7 @@ func main() {
 	r.Use(gin.Recovery())
 	r.Use(cors.New(cors.Config{
 		AllowOrigins: []string{"https://darvishkzone.com", "https://dev.darvishkzone.com"},
-		AllowMethods: []string{"GET"},
+		AllowMethods: []string{"GET", "POST", "DELETE"},
 		AllowHeaders: []string{"Origin", "Content-Type", "Authorization"},
 	}))
 
@@ -69,6 +69,8 @@ func main() {
 	routers.RegisterTrade(api)
 	routers.RegisterMarket(api)
 	routers.RegisterPeriod(api)
+	// Favorites always require login, even while JWT_TOKEN_ENABLE is off.
+	routers.RegisterFavorites(api, auth.RequireLogin(auth.PgxUserStore{}, jwtSecret))
 
 	port := cmp.Or(os.Getenv("PORT"), "8080")
 	logger.Info("Server starting", slog.String("port", port))

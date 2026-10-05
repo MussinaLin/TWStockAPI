@@ -11,7 +11,7 @@ tags:
 
 台股分析資料 REST API Server，使用 Go + [Gin](https://gin-gonic.com/) 框架。
 
-資料來源為 PostgreSQL，由 [TWStockAnalysis](../TWStockAnalysis) 批次作業負責寫入。
+資料來源為 PostgreSQL，由 [TWStockAnalysis](../TWStockAnalysis) 批次作業負責寫入。唯一的例外是「我的最愛」（`/api/favorites`），由本服務寫入 `user_favorite_stocks`。
 
 [![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template/dTvvSf)
 
@@ -78,6 +78,8 @@ UPDATE config SET value = 'true', updated_time = now() WHERE key = 'JWT_TOKEN_EN
 ```
 
 第一次設定時執行 `db/config.sql` 建立這一列（預設 `false`）。
+
+**例外：`/api/favorites/*` 一律需要登入**，不受 `JWT_TOKEN_ENABLE` 影響，驗證失敗的回應同上表。
 
 前端串接方式（如何在 request 帶 token、401 處理、CORS）見 [docs/frontend-api-auth-integration.md](docs/frontend-api-auth-integration.md)。
 
@@ -717,6 +719,67 @@ UPDATE config SET value = 'true', updated_time = now() WHERE key = 'JWT_TOKEN_EN
 ```
 
 找不到資料時回傳空陣列 `[]`。
+
+---
+
+### Favorites — 我的最愛
+
+**一律需要登入**：不論 `JWT_TOKEN_ENABLE` 為何，都必須帶 `Authorization: Bearer <token>`；驗證失敗的回應見[認證](#認證)。
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/favorites` | 查詢自己的我的最愛（最新加入的在前） |
+| POST | `/api/favorites` | 新增一檔我的最愛 |
+| DELETE | `/api/favorites/:symbol` | 移除一檔我的最愛 |
+
+數量上限依 `users.member_level` 而定，設定在 `user_config` 表的 `FAVORITE_STOCKS_LIMIT`（JSONB，key 為 member_level 字串；`is_og_member` 不影響）。修改上限：
+
+```sql
+UPDATE user_config SET value = '{"0": 10, "1": 15, "2": 20}', updated_time = now()
+WHERE key = 'FAVORITE_STOCKS_LIMIT';
+```
+
+第一次部署前執行 `db/user_favorites.sql`，建立 `user_config`、`user_favorite_stocks` 兩張表與上限的初始設定。找不到設定或找不到該 level 的上限時，GET / POST 回 `500`。
+
+#### `GET /api/favorites`
+
+**Response (200):**
+
+```json
+{
+  "limit": 10,
+  "count": 2,
+  "items": [
+    { "symbol": "2330", "name": "台積電", "created_time": "2026-10-05T09:12:00Z" },
+    { "symbol": "2317", "name": "鴻海", "created_time": "2026-10-04T15:00:00Z" }
+  ]
+}
+```
+
+- `items` 依 `created_time` 由新到舊排序；沒有資料時為 `[]`。
+- 加入後被停用（`stocks.enabled = false`）的股票仍會列出。
+
+#### `POST /api/favorites`
+
+**Request Body:**
+
+```json
+{ "symbol": "2330" }
+```
+
+`symbol` 會先去掉前後空白。只能加入 `stocks.enabled = true` 的股票。
+
+| HTTP | Body | 意義 |
+|------|------|------|
+| `201` | `{"symbol":"2330","name":"台積電","created_time":"..."}` | 新增成功 |
+| `200` | 同上（既有的那筆） | 本來就已加入（即使已額滿） |
+| `400` | `{"error":"invalid request"}` | body 不是合法的 JSON，或 `symbol` 是空的 |
+| `404` | `{"error":"stock not found"}` | 股票不存在或未啟用 |
+| `409` | `{"error":"favorite limit reached","limit":10}` | 已達上限 |
+
+#### `DELETE /api/favorites/:symbol`
+
+移除一檔我的最愛。不論原本是否存在，一律回 `204`（沒有 body）。
 
 ---
 

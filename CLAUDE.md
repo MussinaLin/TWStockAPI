@@ -25,7 +25,7 @@ Requires `DATABASE_URL` env var (PostgreSQL connection string). Server listens o
 
 - **`main.go`** — App entry point: loads `.env`, inits DB pool, registers middleware (`slog-gin`, `gin.Recovery`, CORS allowing `GET` / `POST` / `DELETE` and the `Authorization` header), mounts health checks and API route groups; the `/api` group runs `auth.RequireAuth`; `/api/favorites` additionally runs `auth.RequireLogin`.
 - **`db/db.go`** — PostgreSQL connection pool via `pgxpool` (min 2, max 10 connections).
-- **`db/*.sql`** — 需手動在 DB 執行的 DDL / seed（可重複執行）：`config.sql`（`JWT_TOKEN_ENABLE`）、`user_favorites.sql`（`user_config`、`user_favorite_stocks` 與 `FAVORITE_STOCKS_LIMIT` 初始值）。
+- **`db/*.sql`** — 需手動在 DB 執行的 DDL / seed（可重複執行）：`config.sql`（`JWT_TOKEN_ENABLE`）、`user_favorites.sql`（`user_config`、`user_favorite_stocks` 與 `FAVORITE_GROUPS` 初始值）、`user_favorites_v2_migration.sql`（v1 單一清單 → v2 群組；會刪除所有我的最愛資料，只在套用過 v1 的環境跑一次）。
 - **`auth/`** — JWT 驗證 filter，掛在 `/api` group（`/health*` 不驗證）。開關為 DB `config` 表的 `JWT_TOKEN_ENABLE`（值為 `'true'` 才啟用；沒有這一列視為 false；60 秒記憶體快取）。`db/config.sql` 建立這一列（預設 `false`）。
   - 啟用時需帶 `Authorization: Bearer <jwt>`（AccountService 簽發，HS256，`JWT_SECRET` 須相同）。`sub` = `users.id`，查 `users` 表取得 email，以 `auth.User{ID, Email}` 存入 `gin.Context`（key `auth.ContextUserKey`）。
   - 過期回 401 `{"error":"token expired"}`；其他驗證失敗回 401 `{"error":"unauthorized"}`；讀 config / users 出錯或未設 `JWT_SECRET` 回 500。
@@ -38,7 +38,7 @@ Requires `DATABASE_URL` env var (PostgreSQL connection string). Server listens o
   - `trade.go` — `/api/trade/trade-records` — trade records with date range filtering (default 90 days), includes summary stats (profit_count, loss_count, avg_performance, win_rate)
   - `market.go` — `/api/market`, `/api/market/dates`, `/api/market/:date` — TAIEX 大盤每日資料（OHLC、總成交量、融資餘額、外資買賣超）
   - `period.go` — `/api/period/holding/:symbol` — 集保持股比例（stock_holder_percent, weekly）；回傳 major_ratio（大戶比例）、retail_ratio（散戶比例）；支援 `?limit`，未帶 limit 時回傳全部
-  - `favorites.go` — `/api/favorites`（GET / POST / DELETE `/:symbol`）— 使用者的我的最愛個股（`user_favorite_stocks`），一律需要登入。上限依 `users.member_level`，設定在 `user_config` 的 `FAVORITE_STOCKS_LIMIT`（JSONB，例如 `{"0":10,"1":15,"2":20}`；找不到 level 回 500）。GET 回傳 `{limit, count, items[{symbol,name,created_time}]}`（`created_time DESC`）；POST `{"symbol"}`：201 新增、200 已存在、400 格式錯誤、404 股票不存在或未啟用、409 額滿；POST 在 transaction 裡用 `SELECT ... FOR UPDATE` 鎖住 user 的 row；DELETE 一律回 204。
+  - `favorites.go` / `favorites_config.go` — `/api/favorites` — 使用者的我的最愛（`user_favorite_stocks`），一律需要登入。分成固定數量的群組（群組一、群組二……；`group_no` 從 1 開始，名稱由 `groupName` 產生；不建群組表），同一檔可以放在多個群組。群組數與每組上限依 `users.member_level`，設定在 `user_config` 的 `FAVORITE_GROUPS`（JSONB，例如 `{"0":{"groups":5,"stocks_per_group":5}}`；找不到 level 或格式錯誤回 500）。`GET /api/favorites` 回傳 `{max_groups, max_stocks_per_group, groups[{group_no,name,count,items[{symbol,name,created_time}]}]}`（包括空的群組；群組內 `created_time DESC`）；`POST /api/favorites/groups/:group_no` `{"symbol"}`：201 新增、200 已存在、400 格式錯誤、404 `group not found` / `stock not found`、409 `favorite group full`；`DELETE /api/favorites/groups/:group_no/:symbol` 回 204（群組不存在回 404）。降級時超過目前群組數的資料保留但不顯示。POST 在 transaction 裡用 `SELECT ... FOR UPDATE` 鎖住 user 的 row。
   - `helpers.go` — `rowsToMaps` converts pgx rows to `[]map[string]any` with type handling (dates → ISO strings, NaN/Inf → nil)
 
 All endpoints except `/api/favorites` are read-only SELECT queries. Response format is JSON. Dates are returned as ISO 8601 strings (`created_time` in favorites is a full RFC 3339 timestamp).

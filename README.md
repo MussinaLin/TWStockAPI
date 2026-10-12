@@ -726,22 +726,28 @@ UPDATE config SET value = 'true', updated_time = now() WHERE key = 'JWT_TOKEN_EN
 
 **一律需要登入**：不論 `JWT_TOKEN_ENABLE` 為何，都必須帶 `Authorization: Bearer <token>`；驗證失敗的回應見[認證](#認證)。
 
+我的最愛分成固定數量的群組（群組一、群組二……），群組數與每組上限依 `users.member_level` 而定；同一檔股票可以放在多個群組。
+
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/favorites` | 查詢自己的我的最愛（最新加入的在前） |
-| POST | `/api/favorites` | 新增一檔我的最愛 |
-| DELETE | `/api/favorites/:symbol` | 移除一檔我的最愛 |
+| GET | `/api/favorites` | 查詢自己所有的群組與群組底下的個股 |
+| POST | `/api/favorites/groups/:group_no` | 把一檔股票加入指定群組 |
+| DELETE | `/api/favorites/groups/:group_no/:symbol` | 從指定群組移除一檔股票 |
 
-數量上限依 `users.member_level` 而定，設定在 `user_config` 表的 `FAVORITE_STOCKS_LIMIT`（JSONB，key 為 member_level 字串；`is_og_member` 不影響）。修改上限：
+規則設定在 `user_config` 表的 `FAVORITE_GROUPS`（JSONB，key 為 member_level 字串；`is_og_member` 不影響）。修改規則：
 
 ```sql
-UPDATE user_config SET value = '{"0": 10, "1": 15, "2": 20}', updated_time = now()
-WHERE key = 'FAVORITE_STOCKS_LIMIT';
+UPDATE user_config
+SET value = '{"0": {"groups": 5, "stocks_per_group": 5}, "1": {"groups": 10, "stocks_per_group": 10}}',
+    updated_time = now()
+WHERE key = 'FAVORITE_GROUPS';
 ```
 
-前端串接方式見 [docs/frontend-favorites-integration.md](docs/frontend-favorites-integration.md)。
+`groups` 必須在 1–99、`stocks_per_group` ≥ 0。找不到設定、找不到該 level 或格式錯誤時，三支 API 都回 `500`。會員等級調降時，超過新群組數的資料會保留但不顯示；群組內超過上限時照樣列出，但不能再加入。
 
-第一次部署前執行 `db/user_favorites.sql`，建立 `user_config`、`user_favorite_stocks` 兩張表與上限的初始設定。找不到設定或找不到該 level 的上限時，GET / POST 回 `500`。
+**資料表：** 全新環境執行 `db/user_favorites.sql`。套用過舊版（單一清單）的環境改執行一次 `db/user_favorites_v2_migration.sql`（**會刪除所有我的最愛資料**）。
+
+前端串接方式見 [docs/frontend-favorites-integration.md](docs/frontend-favorites-integration.md)。
 
 #### `GET /api/favorites`
 
@@ -749,19 +755,29 @@ WHERE key = 'FAVORITE_STOCKS_LIMIT';
 
 ```json
 {
-  "limit": 10,
-  "count": 2,
-  "items": [
-    { "symbol": "2330", "name": "台積電", "created_time": "2026-10-05T09:12:00Z" },
-    { "symbol": "2317", "name": "鴻海", "created_time": "2026-10-04T15:00:00Z" }
+  "max_groups": 5,
+  "max_stocks_per_group": 5,
+  "groups": [
+    {
+      "group_no": 1,
+      "name": "群組一",
+      "count": 2,
+      "items": [
+        { "symbol": "2330", "name": "台積電", "created_time": "2026-10-12T09:12:00Z" },
+        { "symbol": "2317", "name": "鴻海", "created_time": "2026-10-11T15:00:00Z" }
+      ]
+    },
+    { "group_no": 2, "name": "群組二", "count": 0, "items": [] }
   ]
 }
 ```
 
-- `items` 依 `created_time` 由新到舊排序；沒有資料時為 `[]`。
-- 加入後被停用（`stocks.enabled = false`）的股票仍會列出。
+- `groups` 固定有 `max_groups` 個，依 `group_no` 由小到大；空的群組 `items` 為 `[]`。
+- 群組內依 `created_time` 由新到舊排序；加入後被停用（`stocks.enabled = false`）的股票仍會列出。
 
-#### `POST /api/favorites`
+#### `POST /api/favorites/groups/:group_no`
+
+**Path Parameters:** `group_no` — 群組編號（從 1 開始）
 
 **Request Body:**
 
@@ -773,15 +789,16 @@ WHERE key = 'FAVORITE_STOCKS_LIMIT';
 
 | HTTP | Body | 意義 |
 |------|------|------|
-| `201` | `{"symbol":"2330","name":"台積電","created_time":"..."}` | 新增成功 |
-| `200` | 同上（既有的那筆） | 本來就已加入（即使已額滿） |
-| `400` | `{"error":"invalid request"}` | body 不是合法的 JSON，或 `symbol` 是空的 |
+| `201` | `{"group_no":1,"symbol":"2330","name":"台積電","created_time":"..."}` | 新增成功 |
+| `200` | 同上（既有的那筆） | 這個群組裡本來就有（即使群組已滿） |
+| `400` | `{"error":"invalid request"}` | `group_no` 不是 ≥ 1 的整數、body 不是合法的 JSON，或 `symbol` 是空的 |
+| `404` | `{"error":"group not found"}` | `group_no` 超過目前等級的群組數 |
 | `404` | `{"error":"stock not found"}` | 股票不存在或未啟用 |
-| `409` | `{"error":"favorite limit reached","limit":10}` | 已達上限 |
+| `409` | `{"error":"favorite group full","limit":5}` | 群組已滿 |
 
-#### `DELETE /api/favorites/:symbol`
+#### `DELETE /api/favorites/groups/:group_no/:symbol`
 
-移除一檔我的最愛。不論原本是否存在，一律回 `204`（沒有 body）。
+從指定群組移除一檔股票（其他群組裡的同一檔不受影響）。不論原本是否存在，一律回 `204`（沒有 body）；`group_no` 不是 ≥ 1 的整數回 `400`，超過目前等級的群組數回 `404 {"error":"group not found"}`。
 
 ---
 

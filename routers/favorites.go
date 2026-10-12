@@ -22,6 +22,7 @@ import (
 func RegisterFavorites(rg *gin.RouterGroup, requireLogin gin.HandlerFunc) {
 	g := rg.Group("/favorites", requireLogin)
 	g.GET("", listFavorites)
+	g.POST("/groups/:group_no", addFavorite)
 	g.DELETE("/groups/:group_no/:symbol", deleteFavorite)
 }
 
@@ -36,6 +37,14 @@ type favoriteGroup struct {
 	Name    string         `json:"name"`
 	Count   int            `json:"count"`
 	Items   []favoriteItem `json:"items"`
+}
+
+// favoriteGroupItem is the POST response: one stock in one group.
+type favoriteGroupItem struct {
+	GroupNo     int       `json:"group_no"`
+	Symbol      string    `json:"symbol"`
+	Name        string    `json:"name"`
+	CreatedTime time.Time `json:"created_time"`
 }
 
 // querier is satisfied by both *pgxpool.Pool and pgx.Tx.
@@ -144,6 +153,107 @@ func listFavorites(c *gin.Context) {
 		"max_stocks_per_group": rule.StocksPerGroup,
 		"groups":               groups,
 	})
+}
+
+type addFavoriteRequest struct {
+	Symbol string `json:"symbol"`
+}
+
+// addFavorite 把一檔股票加入指定群組。整個流程在同一個 transaction 裡，先以 FOR UPDATE
+// 鎖住 user 的 row，讓同一個 user 的請求排隊處理，避免同時送出時超過群組上限。
+func addFavorite(c *gin.Context) {
+	user, ok := auth.CurrentUser(c)
+	if !ok {
+		favoritesServerError(c, errors.New("favorites: no authenticated user"))
+		return
+	}
+	groupNo, ok := parseGroupNo(c)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	var req addFavoriteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	symbol := strings.TrimSpace(req.Symbol)
+	if symbol == "" || invalidSymbol(symbol) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+
+	ctx := c.Request.Context()
+	tx, err := db.Pool().Begin(ctx)
+	if err != nil {
+		favoritesServerError(c, fmt.Errorf("favorites: begin: %w", err))
+		return
+	}
+	defer tx.Rollback(ctx) // 已 Commit 時為 no-op
+
+	rule, err := loadUserRule(ctx, tx, selectMemberLevelForUpdate, user.ID)
+	if err != nil {
+		respondRuleError(c, err)
+		return
+	}
+	if groupNo > rule.Groups {
+		c.JSON(http.StatusNotFound, gin.H{"error": "group not found"})
+		return
+	}
+
+	item := favoriteGroupItem{GroupNo: groupNo, Symbol: symbol}
+	err = tx.QueryRow(ctx,
+		`SELECT s.name, f.created_time
+		FROM user_favorite_stocks f
+		JOIN stocks s ON s.symbol = f.symbol
+		WHERE f.user_id = $1::uuid AND f.group_no = $2 AND f.symbol = $3`,
+		user.ID, groupNo, symbol).Scan(&item.Name, &item.CreatedTime)
+	if err == nil {
+		c.JSON(http.StatusOK, item)
+		return
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		favoritesServerError(c, fmt.Errorf("favorites: find existing: %w", err))
+		return
+	}
+
+	err = tx.QueryRow(ctx,
+		"SELECT name FROM stocks WHERE symbol = $1 AND enabled", symbol).Scan(&item.Name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "stock not found"})
+		return
+	}
+	if err != nil {
+		favoritesServerError(c, fmt.Errorf("favorites: find stock: %w", err))
+		return
+	}
+
+	var count int
+	err = tx.QueryRow(ctx,
+		"SELECT COUNT(*) FROM user_favorite_stocks WHERE user_id = $1::uuid AND group_no = $2",
+		user.ID, groupNo).Scan(&count)
+	if err != nil {
+		favoritesServerError(c, fmt.Errorf("favorites: count: %w", err))
+		return
+	}
+	if count >= rule.StocksPerGroup {
+		c.JSON(http.StatusConflict, gin.H{"error": "favorite group full", "limit": rule.StocksPerGroup})
+		return
+	}
+
+	err = tx.QueryRow(ctx,
+		`INSERT INTO user_favorite_stocks (user_id, group_no, symbol)
+		VALUES ($1::uuid, $2, $3) RETURNING created_time`,
+		user.ID, groupNo, symbol).Scan(&item.CreatedTime)
+	if err != nil {
+		favoritesServerError(c, fmt.Errorf("favorites: insert: %w", err))
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		favoritesServerError(c, fmt.Errorf("favorites: commit: %w", err))
+		return
+	}
+	c.JSON(http.StatusCreated, item)
 }
 
 // deleteFavorite 從指定群組移除一檔股票；不論原本是否存在都回 204。

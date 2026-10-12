@@ -2,8 +2,12 @@ package routers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -346,6 +350,263 @@ func TestDeleteFavorite_UnknownLevel(t *testing.T) {
 
 func TestDeleteFavorite_UserGone(t *testing.T) {
 	status, body := doJSON(t, newFavoritesRouter(uuid.NewString()), "DELETE", groupPath(1)+"/2330")
+	assert.Equal(t, 401, status)
+	assert.Equal(t, map[string]any{"error": "unauthorized"}, body)
+}
+
+// doJSONBody is doJSON with a JSON request body.
+func doJSONBody(t *testing.T, r *gin.Engine, method, path, body string) (int, any) {
+	t.Helper()
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	var decoded any
+	if w.Body.Len() > 0 {
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &decoded), "decode body: %s", w.Body.String())
+	}
+	return w.Code, decoded
+}
+
+// postStatus sends one POST without testify (safe to call from goroutines).
+func postStatus(r *gin.Engine, groupNo int, symbol string) int {
+	req := httptest.NewRequest("POST", groupPath(groupNo), strings.NewReader(`{"symbol":"`+symbol+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w.Code
+}
+
+// ── POST /api/favorites/groups/:group_no ──
+
+func TestAddFavorite_CreatedThenIdempotent(t *testing.T) {
+	symbol := enabledSymbols(t, 1)[0]
+	userID := newFavoritesUser(t, 0)
+	r := newFavoritesRouter(userID)
+
+	status, body := doJSONBody(t, r, "POST", groupPath(1), `{"symbol":"`+symbol+`"}`)
+	require.Equal(t, 201, status, "body: %v", body)
+	created := body.(map[string]any)
+	requireKeys(t, created, "group_no", "symbol", "name", "created_time")
+	assert.Equal(t, float64(1), created["group_no"])
+	assert.Equal(t, symbol, created["symbol"])
+	_, err := time.Parse(time.RFC3339Nano, created["created_time"].(string))
+	assert.NoError(t, err)
+
+	status, body = doJSONBody(t, r, "POST", groupPath(1), `{"symbol":"`+symbol+`"}`)
+	require.Equal(t, 200, status)
+	assert.Equal(t, created, body)
+	assert.Equal(t, 1, groupCount(t, userID, 1))
+}
+
+func TestAddFavorite_SameStockInTwoGroups(t *testing.T) {
+	symbol := enabledSymbols(t, 1)[0]
+	userID := newFavoritesUser(t, 0)
+	r := newFavoritesRouter(userID)
+
+	status, _ := doJSONBody(t, r, "POST", groupPath(1), `{"symbol":"`+symbol+`"}`)
+	require.Equal(t, 201, status)
+	status, body := doJSONBody(t, r, "POST", groupPath(2), `{"symbol":"`+symbol+`"}`)
+	require.Equal(t, 201, status)
+	assert.Equal(t, float64(2), body.(map[string]any)["group_no"])
+
+	status, body = doJSON(t, r, "GET", "/api/favorites")
+	require.Equal(t, 200, status)
+	groups := groupsOf(t, body)
+	assert.Equal(t, float64(1), groups[0]["count"])
+	assert.Equal(t, float64(1), groups[1]["count"])
+}
+
+func TestAddFavorite_TrimsSymbol(t *testing.T) {
+	symbol := enabledSymbols(t, 1)[0]
+	userID := newFavoritesUser(t, 0)
+
+	status, body := doJSONBody(t, newFavoritesRouter(userID), "POST", groupPath(1), `{"symbol":"  `+symbol+` "}`)
+	require.Equal(t, 201, status, "body: %v", body)
+	assert.Equal(t, symbol, body.(map[string]any)["symbol"])
+}
+
+func TestAddFavorite_GroupNoVariants(t *testing.T) {
+	symbols := enabledSymbols(t, 2)
+	userID := newFavoritesUser(t, 0)
+	r := newFavoritesRouter(userID)
+
+	status, body := doJSONBody(t, r, "POST", "/api/favorites/groups/+1", `{"symbol":"`+symbols[0]+`"}`)
+	require.Equal(t, 201, status, "body: %v", body)
+	assert.Equal(t, float64(1), body.(map[string]any)["group_no"])
+
+	status, body = doJSONBody(t, r, "POST", "/api/favorites/groups/01", `{"symbol":"`+symbols[1]+`"}`)
+	require.Equal(t, 201, status, "body: %v", body)
+	assert.Equal(t, float64(1), body.(map[string]any)["group_no"])
+	assert.Equal(t, 2, groupCount(t, userID, 1))
+}
+
+func TestAddFavorite_InvalidRequest(t *testing.T) {
+	symbol := enabledSymbols(t, 1)[0]
+	userID := newFavoritesUser(t, 0)
+	r := newFavoritesRouter(userID)
+	invalid := map[string]struct{ group, payload string }{
+		"group abc":        {"abc", `{"symbol":"` + symbol + `"}`},
+		"group zero":       {"0", `{"symbol":"` + symbol + `"}`},
+		"group negative":   {"-1", `{"symbol":"` + symbol + `"}`},
+		"group fractional": {"1.5", `{"symbol":"` + symbol + `"}`},
+		"invalid json":     {"1", `{`},
+		"empty body":       {"1", ``},
+		"missing symbol":   {"1", `{}`},
+		"blank symbol":     {"1", `{"symbol":"   "}`},
+		"non-string value": {"1", `{"symbol":2330}`},
+		"nul symbol":       {"1", `{"symbol":"\u0000"}`},
+		"nul in middle":    {"1", `{"symbol":"23\u000030"}`},
+	}
+	for name, tc := range invalid {
+		t.Run(name, func(t *testing.T) {
+			status, body := doJSONBody(t, r, "POST", "/api/favorites/groups/"+tc.group, tc.payload)
+			assert.Equal(t, 400, status)
+			assert.Equal(t, map[string]any{"error": "invalid request"}, body)
+		})
+	}
+	assert.Equal(t, 0, groupCount(t, userID, 1))
+}
+
+func TestAddFavorite_GroupNotFound(t *testing.T) {
+	rule := groupRuleFor(t, 0)
+	symbol := enabledSymbols(t, 1)[0]
+	userID := newFavoritesUser(t, 0)
+	r := newFavoritesRouter(userID)
+
+	for _, g := range []int{rule.Groups + 1, 99999} {
+		status, body := doJSONBody(t, r, "POST", groupPath(g), `{"symbol":"`+symbol+`"}`)
+		assert.Equal(t, 404, status, "group_no %d", g)
+		assert.Equal(t, map[string]any{"error": "group not found"}, body)
+	}
+}
+
+func TestAddFavorite_StockNotFound(t *testing.T) {
+	userID := newFavoritesUser(t, 0)
+	r := newFavoritesRouter(userID)
+	for name, symbol := range map[string]string{"unknown": "__NOPE__", "overlong": "12345678901234567890"} {
+		t.Run(name, func(t *testing.T) {
+			status, body := doJSONBody(t, r, "POST", groupPath(1), `{"symbol":"`+symbol+`"}`)
+			assert.Equal(t, 404, status)
+			assert.Equal(t, map[string]any{"error": "stock not found"}, body)
+		})
+	}
+	assert.Equal(t, 0, groupCount(t, userID, 1))
+}
+
+func TestAddFavorite_DisabledStock(t *testing.T) {
+	symbol := disabledSymbol(t)
+	userID := newFavoritesUser(t, 0)
+
+	status, body := doJSONBody(t, newFavoritesRouter(userID), "POST", groupPath(1), `{"symbol":"`+symbol+`"}`)
+	assert.Equal(t, 404, status)
+	assert.Equal(t, map[string]any{"error": "stock not found"}, body)
+}
+
+func TestAddFavorite_GroupFull(t *testing.T) {
+	rule := groupRuleFor(t, 0)
+	n := rule.StocksPerGroup
+	symbols := enabledSymbols(t, n+1)
+	userID := newFavoritesUser(t, 0)
+	created := time.Now().Add(-time.Minute)
+	for _, s := range symbols[:n] {
+		addFavoriteRow(t, userID, 1, s, created)
+	}
+	r := newFavoritesRouter(userID)
+
+	// 群組已滿時，加入已在群組裡的股票回 200 並附上既有資料
+	status, body := doJSONBody(t, r, "POST", groupPath(1), `{"symbol":"`+symbols[0]+`"}`)
+	require.Equal(t, 200, status)
+	existing := body.(map[string]any)
+	assert.Equal(t, float64(1), existing["group_no"])
+	assert.Equal(t, symbols[0], existing["symbol"])
+	assert.NotEmpty(t, existing["name"])
+	got, err := time.Parse(time.RFC3339Nano, existing["created_time"].(string))
+	require.NoError(t, err)
+	assert.WithinDuration(t, created, got, time.Millisecond)
+
+	status, body = doJSONBody(t, r, "POST", groupPath(1), `{"symbol":"`+symbols[n]+`"}`)
+	assert.Equal(t, 409, status)
+	assert.Equal(t, map[string]any{"error": "favorite group full", "limit": float64(n)}, body)
+	assert.Equal(t, n, groupCount(t, userID, 1))
+
+	// 其他群組照樣能加入
+	status, _ = doJSONBody(t, r, "POST", groupPath(2), `{"symbol":"`+symbols[n]+`"}`)
+	assert.Equal(t, 201, status)
+}
+
+func TestAddFavorite_Downgraded(t *testing.T) {
+	rule := groupRuleFor(t, 0)
+	if rule.Groups >= 8 {
+		t.Skipf("level 0 has %d groups; this test needs fewer than 8", rule.Groups)
+	}
+	over := rule.StocksPerGroup + 4
+	symbols := enabledSymbols(t, over+1)
+	userID := newFavoritesUser(t, 0)
+	for _, s := range symbols[:over] {
+		addFavoriteRow(t, userID, 1, s, time.Now())
+	}
+	r := newFavoritesRouter(userID)
+
+	status, body := doJSONBody(t, r, "POST", groupPath(1), `{"symbol":"`+symbols[over]+`"}`)
+	assert.Equal(t, 409, status)
+	assert.Equal(t, map[string]any{"error": "favorite group full", "limit": float64(rule.StocksPerGroup)}, body)
+
+	status, body = doJSONBody(t, r, "POST", groupPath(8), `{"symbol":"`+symbols[over]+`"}`)
+	assert.Equal(t, 404, status)
+	assert.Equal(t, map[string]any{"error": "group not found"}, body)
+}
+
+func TestAddFavorite_ConcurrentRequestsRespectGroupLimit(t *testing.T) {
+	rule := groupRuleFor(t, 0)
+	n := rule.StocksPerGroup
+	symbols := enabledSymbols(t, n+5)
+	userID := newFavoritesUser(t, 0)
+	r := newFavoritesRouter(userID)
+
+	type result struct{ group, code int }
+	results := make([]result, 0, 2*len(symbols))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for _, groupNo := range []int{1, 2} {
+		for _, s := range symbols {
+			wg.Add(1)
+			go func(groupNo int, s string) {
+				defer wg.Done()
+				code := postStatus(r, groupNo, s)
+				mu.Lock()
+				results = append(results, result{groupNo, code})
+				mu.Unlock()
+			}(groupNo, s)
+		}
+	}
+	wg.Wait()
+
+	counts := map[int]map[int]int{1: {}, 2: {}}
+	for _, res := range results {
+		counts[res.group][res.code]++
+	}
+	for _, groupNo := range []int{1, 2} {
+		assert.Equal(t, map[int]int{201: n, 409: 5}, counts[groupNo], "group %d", groupNo)
+		assert.Equal(t, n, groupCount(t, userID, groupNo), "group %d", groupNo)
+	}
+}
+
+func TestAddFavorite_UnknownLevel(t *testing.T) {
+	symbol := enabledSymbols(t, 1)[0]
+	userID := newFavoritesUser(t, 99)
+
+	status, body := doJSONBody(t, newFavoritesRouter(userID), "POST", groupPath(1), `{"symbol":"`+symbol+`"}`)
+	assert.Equal(t, 500, status)
+	assert.Equal(t, map[string]any{"detail": "Internal server error"}, body)
+	assert.Equal(t, 0, groupCount(t, userID, 1))
+}
+
+func TestAddFavorite_UserGone(t *testing.T) {
+	symbol := enabledSymbols(t, 1)[0]
+
+	status, body := doJSONBody(t, newFavoritesRouter(uuid.NewString()), "POST", groupPath(1), `{"symbol":"`+symbol+`"}`)
 	assert.Equal(t, 401, status)
 	assert.Equal(t, map[string]any{"error": "unauthorized"}, body)
 }

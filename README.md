@@ -745,7 +745,7 @@ WHERE key = 'FAVORITE_GROUPS';
 
 `groups` 必須在 1–99、`stocks_per_group` ≥ 0。找不到設定、找不到該 level 或格式錯誤時，三支 API 都回 `500`。會員等級調降時，超過新群組數的資料會保留但不顯示；群組內超過上限時照樣列出，但不能再加入。
 
-**資料表：** 全新環境執行 `db/user_favorites.sql`。套用過舊版（單一清單）的環境改執行一次 `db/user_favorites_v2_migration.sql`（**會刪除所有我的最愛資料**）。
+**資料表（部署新版程式之前先執行）：** 全新環境（例如 production）執行 `db/user_favorites.sql`，可重複執行。套用過舊版（單一清單）的環境改執行**一次** `db/user_favorites_v2_migration.sql`（**會刪除所有我的最愛資料，不可重複執行**；staging 已執行過）。程式已部署但 SQL 還沒執行時，三支 API 都會回 `500`。
 
 前端串接方式見 [docs/frontend-favorites-integration.md](docs/frontend-favorites-integration.md)。
 

@@ -39,7 +39,7 @@
 | `POST` | `/api/favorites/groups/:group_no` | 把一檔股票加入指定群組 |
 | `DELETE` | `/api/favorites/groups/:group_no/:symbol` | 從指定群組移除一檔股票 |
 
-- `group_no` 是群組編號，**從 1 開始**（群組一 = `1`）。
+- `group_no` 是群組編號，**從 1 開始**（群組一 = `1`）。回應裡的 `group_no` 一律是 number；前端比對時記得把 `<select>` 等來源的字串轉成 number（見 §4.3 `groupOf`）。
 - Base URL 與環境同 [frontend-api-auth-integration.md §2](frontend-api-auth-integration.md#2-環境)（staging：`https://twstockapi-staging.up.railway.app`）。
 - 所有 request 都要帶 `Authorization: Bearer <token>`。
 
@@ -281,8 +281,9 @@ export async function loadFavorites() {
   state.groups = data.groups;
 }
 
+// groupNo 可以是 number 或字串（例如 <select> 的 value、URL 參數），一律轉成 number 比對
 function groupOf(groupNo) {
-  return state.groups.find((g) => g.group_no === groupNo);
+  return state.groups.find((g) => g.group_no === Number(groupNo));
 }
 
 // 這檔股票在哪些群組裡（例如畫星號、或在選單中打勾）
@@ -301,9 +302,11 @@ export async function onAdd(groupNo, symbol) {
   try {
     const { group_no, ...item } = await addToGroup(groupNo, symbol);
     const g = groupOf(group_no);
-    // 201 或 200 都放到最前面；先過濾掉同代號，避免 200 時重複
-    g.items = [item, ...g.items.filter((i) => i.symbol !== item.symbol)];
-    g.count = g.items.length;
+    // 201（新加入）放到最前面；200（本來就在群組裡）不用動，維持與後端相同的順序
+    if (!g.items.some((i) => i.symbol === item.symbol)) {
+      g.items = [item, ...g.items];
+      g.count = g.items.length;
+    }
   } catch (err) {
     if (err instanceof ApiError && err.status === 409) {
       state.maxPerGroup = err.body.limit; // 以後端回傳的上限為準
@@ -343,6 +346,7 @@ export async function onRemove(groupNo, symbol) {
 
 // 把股票從一個群組移到另一個群組：先加入新群組，成功後再從舊群組移除
 export async function onMove(fromGroupNo, toGroupNo, symbol) {
+  if (Number(fromGroupNo) === Number(toGroupNo)) return; // 同一個群組：什麼都不做（否則會把它刪掉）
   await onAdd(toGroupNo, symbol);
   if (groupOf(toGroupNo)?.items.some((i) => i.symbol === symbol)) {
     await onRemove(fromGroupNo, symbol);
@@ -364,6 +368,13 @@ export const addToGroup = (groupNo, symbol) =>
 
 export const removeFromGroup = (groupNo, symbol) =>
   api.delete(`/api/favorites/groups/${groupNo}/${encodeURIComponent(symbol)}`); // 204，r.data 為 ""
+
+// 群組資訊過期時重新取得（與 §4.3 的 loadFavorites 相同）
+async function reloadFavorites() {
+  const data = await listFavoriteGroups();
+  // 用 data 更新你們的 state 並重畫
+  return data;
+}
 
 // 錯誤處理
 try {

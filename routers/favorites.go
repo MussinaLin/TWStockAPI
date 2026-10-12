@@ -2,13 +2,13 @@ package routers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"main/auth"
 	"main/db"
@@ -17,17 +17,12 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// favoriteLimitKey is the user_config key holding the per-member_level limits,
-// e.g. {"0": 10, "1": 15, "2": 20}.
-const favoriteLimitKey = "FAVORITE_STOCKS_LIMIT"
-
 // RegisterFavorites mounts /favorites behind requireLogin; every handler needs
 // the authenticated user.
 func RegisterFavorites(rg *gin.RouterGroup, requireLogin gin.HandlerFunc) {
 	g := rg.Group("/favorites", requireLogin)
 	g.GET("", listFavorites)
-	g.POST("", addFavorite)
-	g.DELETE("/:symbol", deleteFavorite)
+	g.DELETE("/groups/:group_no/:symbol", deleteFavorite)
 }
 
 type favoriteItem struct {
@@ -36,12 +31,68 @@ type favoriteItem struct {
 	CreatedTime time.Time `json:"created_time"`
 }
 
+type favoriteGroup struct {
+	GroupNo int            `json:"group_no"`
+	Name    string         `json:"name"`
+	Count   int            `json:"count"`
+	Items   []favoriteItem `json:"items"`
+}
+
 // querier is satisfied by both *pgxpool.Pool and pgx.Tx.
 type querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-// listFavorites 回傳 user 的我的最愛（最新加入在前），以及該 member_level 的上限。
+// errUserGone means the authenticated user's users row no longer exists.
+var errUserGone = errors.New("favorites: user no longer exists")
+
+// selectMemberLevel 讀取 user 的 member_level；selectMemberLevelForUpdate 同時鎖住
+// user 的 row，讓同一個 user 的 POST 排隊處理。
+const (
+	selectMemberLevel          = "SELECT member_level FROM users WHERE id = $1::uuid"
+	selectMemberLevelForUpdate = selectMemberLevel + " FOR UPDATE"
+)
+
+// loadUserRule 讀取 user 的 member_level 與對應的群組規則。levelSQL 為
+// selectMemberLevel 或 selectMemberLevelForUpdate；user 不存在時回傳 errUserGone。
+func loadUserRule(ctx context.Context, q querier, levelSQL, userID string) (groupRule, error) {
+	var level int
+	err := q.QueryRow(ctx, levelSQL, userID).Scan(&level)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return groupRule{}, errUserGone
+	}
+	if err != nil {
+		return groupRule{}, fmt.Errorf("favorites: load member_level: %w", err)
+	}
+	return loadFavoriteGroups(ctx, q, level)
+}
+
+// respondRuleError 依 loadUserRule 的錯誤回 401（user 已不存在）或 500。
+func respondRuleError(c *gin.Context, err error) {
+	if errors.Is(err, errUserGone) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	favoritesServerError(c, err)
+}
+
+// parseGroupNo 解析 :group_no；只接受 >= 1 的整數。
+func parseGroupNo(c *gin.Context) (int, bool) {
+	n, err := strconv.Atoi(c.Param("group_no"))
+	if err != nil || n < 1 {
+		return 0, false
+	}
+	return n, true
+}
+
+// invalidSymbol 回報 PostgreSQL 無法當成字串參數的 symbol（含 NUL 或不是合法的 UTF-8）；
+// 這種 symbol 不可能存在於 stocks。
+func invalidSymbol(s string) bool {
+	return strings.ContainsRune(s, 0) || !utf8.ValidString(s)
+}
+
+// listFavorites 回傳目前等級的所有群組（包括空的群組）與群組底下的個股。
+// group_no 超過目前群組數的資料（降級後）保留在 DB，但不回傳。
 func listFavorites(c *gin.Context) {
 	user, ok := auth.CurrentUser(c)
 	if !ok {
@@ -50,197 +101,88 @@ func listFavorites(c *gin.Context) {
 	}
 	ctx := c.Request.Context()
 
-	var level int
-	err := db.Pool().QueryRow(ctx,
-		"SELECT member_level FROM users WHERE id = $1::uuid", user.ID).Scan(&level)
-	if errors.Is(err, pgx.ErrNoRows) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
+	rule, err := loadUserRule(ctx, db.Pool(), selectMemberLevel, user.ID)
 	if err != nil {
-		favoritesServerError(c, fmt.Errorf("favorites: load member_level: %w", err))
+		respondRuleError(c, err)
 		return
 	}
 
-	limit, err := loadFavoriteLimit(ctx, db.Pool(), level)
-	if err != nil {
-		favoritesServerError(c, err)
-		return
+	groups := make([]favoriteGroup, rule.Groups)
+	for i := range groups {
+		groups[i] = favoriteGroup{GroupNo: i + 1, Name: groupName(i + 1), Items: []favoriteItem{}}
 	}
 
 	rows, err := db.Pool().Query(ctx,
-		`SELECT f.symbol, s.name, f.created_time
+		`SELECT f.group_no, f.symbol, s.name, f.created_time
 		FROM user_favorite_stocks f
 		JOIN stocks s ON s.symbol = f.symbol
-		WHERE f.user_id = $1::uuid
-		ORDER BY f.created_time DESC, f.symbol`, user.ID)
+		WHERE f.user_id = $1::uuid AND f.group_no <= $2
+		ORDER BY f.group_no, f.created_time DESC, f.symbol`, user.ID, rule.Groups)
 	if err != nil {
 		favoritesServerError(c, fmt.Errorf("favorites: list: %w", err))
 		return
 	}
-	items, err := pgx.CollectRows(rows, pgx.RowToStructByPos[favoriteItem])
-	if err != nil {
+	defer rows.Close()
+	for rows.Next() {
+		var groupNo int
+		var item favoriteItem
+		if err := rows.Scan(&groupNo, &item.Symbol, &item.Name, &item.CreatedTime); err != nil {
+			favoritesServerError(c, fmt.Errorf("favorites: list: %w", err))
+			return
+		}
+		g := &groups[groupNo-1]
+		g.Items = append(g.Items, item)
+		g.Count++
+	}
+	if err := rows.Err(); err != nil {
 		favoritesServerError(c, fmt.Errorf("favorites: list: %w", err))
 		return
 	}
-	if items == nil {
-		items = []favoriteItem{}
-	}
 
-	c.JSON(http.StatusOK, gin.H{"limit": limit, "count": len(items), "items": items})
+	c.JSON(http.StatusOK, gin.H{
+		"max_groups":           rule.Groups,
+		"max_stocks_per_group": rule.StocksPerGroup,
+		"groups":               groups,
+	})
 }
 
-type addFavoriteRequest struct {
-	Symbol string `json:"symbol"`
-}
-
-// addFavorite 新增一檔我的最愛。整個流程在同一個 transaction 裡，先以 FOR UPDATE
-// 鎖住 user 的 row，讓同一個 user 的請求排隊處理，避免同時送出時超過上限。
-func addFavorite(c *gin.Context) {
-	user, ok := auth.CurrentUser(c)
-	if !ok {
-		favoritesServerError(c, errors.New("favorites: no authenticated user"))
-		return
-	}
-
-	var req addFavoriteRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
-		return
-	}
-	symbol := strings.TrimSpace(req.Symbol)
-	if symbol == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
-		return
-	}
-
-	ctx := c.Request.Context()
-	tx, err := db.Pool().Begin(ctx)
-	if err != nil {
-		favoritesServerError(c, fmt.Errorf("favorites: begin: %w", err))
-		return
-	}
-	defer tx.Rollback(ctx) // 已 Commit 時為 no-op
-
-	var level int
-	err = tx.QueryRow(ctx,
-		"SELECT member_level FROM users WHERE id = $1::uuid FOR UPDATE", user.ID).Scan(&level)
-	if errors.Is(err, pgx.ErrNoRows) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	if err != nil {
-		favoritesServerError(c, fmt.Errorf("favorites: lock user: %w", err))
-		return
-	}
-
-	var existing favoriteItem
-	err = tx.QueryRow(ctx,
-		`SELECT f.symbol, s.name, f.created_time
-		FROM user_favorite_stocks f
-		JOIN stocks s ON s.symbol = f.symbol
-		WHERE f.user_id = $1::uuid AND f.symbol = $2`,
-		user.ID, symbol).Scan(&existing.Symbol, &existing.Name, &existing.CreatedTime)
-	if err == nil {
-		c.JSON(http.StatusOK, existing)
-		return
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		favoritesServerError(c, fmt.Errorf("favorites: find existing: %w", err))
-		return
-	}
-
-	item := favoriteItem{Symbol: symbol}
-	err = tx.QueryRow(ctx,
-		"SELECT name FROM stocks WHERE symbol = $1 AND enabled", symbol).Scan(&item.Name)
-	if errors.Is(err, pgx.ErrNoRows) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "stock not found"})
-		return
-	}
-	if err != nil {
-		favoritesServerError(c, fmt.Errorf("favorites: find stock: %w", err))
-		return
-	}
-
-	limit, err := loadFavoriteLimit(ctx, tx, level)
-	if err != nil {
-		favoritesServerError(c, err)
-		return
-	}
-
-	var count int
-	err = tx.QueryRow(ctx,
-		"SELECT COUNT(*) FROM user_favorite_stocks WHERE user_id = $1::uuid", user.ID).Scan(&count)
-	if err != nil {
-		favoritesServerError(c, fmt.Errorf("favorites: count: %w", err))
-		return
-	}
-	if count >= limit {
-		c.JSON(http.StatusConflict, gin.H{"error": "favorite limit reached", "limit": limit})
-		return
-	}
-
-	err = tx.QueryRow(ctx,
-		"INSERT INTO user_favorite_stocks (user_id, symbol) VALUES ($1::uuid, $2) RETURNING created_time",
-		user.ID, symbol).Scan(&item.CreatedTime)
-	if err != nil {
-		favoritesServerError(c, fmt.Errorf("favorites: insert: %w", err))
-		return
-	}
-	if err := tx.Commit(ctx); err != nil {
-		favoritesServerError(c, fmt.Errorf("favorites: commit: %w", err))
-		return
-	}
-	c.JSON(http.StatusCreated, item)
-}
-
-// deleteFavorite 移除一檔我的最愛；不論原本是否存在都回 204。
+// deleteFavorite 從指定群組移除一檔股票；不論原本是否存在都回 204。
 func deleteFavorite(c *gin.Context) {
 	user, ok := auth.CurrentUser(c)
 	if !ok {
 		favoritesServerError(c, errors.New("favorites: no authenticated user"))
 		return
 	}
+	groupNo, ok := parseGroupNo(c)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	symbol := c.Param("symbol")
+	if invalidSymbol(symbol) {
+		c.Status(http.StatusNoContent)
+		return
+	}
+	ctx := c.Request.Context()
 
-	_, err := db.Pool().Exec(c.Request.Context(),
-		"DELETE FROM user_favorite_stocks WHERE user_id = $1::uuid AND symbol = $2",
-		user.ID, c.Param("symbol"))
+	rule, err := loadUserRule(ctx, db.Pool(), selectMemberLevel, user.ID)
+	if err != nil {
+		respondRuleError(c, err)
+		return
+	}
+	if groupNo > rule.Groups {
+		c.JSON(http.StatusNotFound, gin.H{"error": "group not found"})
+		return
+	}
+
+	_, err = db.Pool().Exec(ctx,
+		"DELETE FROM user_favorite_stocks WHERE user_id = $1::uuid AND group_no = $2 AND symbol = $3",
+		user.ID, groupNo, symbol)
 	if err != nil {
 		favoritesServerError(c, fmt.Errorf("favorites: delete: %w", err))
 		return
 	}
 	c.Status(http.StatusNoContent)
-}
-
-// loadFavoriteLimit 讀取 user_config 的 FAVORITE_STOCKS_LIMIT，回傳 level 對應的上限。
-func loadFavoriteLimit(ctx context.Context, q querier, level int) (int, error) {
-	var raw string
-	err := q.QueryRow(ctx,
-		"SELECT value::text FROM user_config WHERE key = $1", favoriteLimitKey).Scan(&raw)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, fmt.Errorf("favorites: %s is not set in user_config", favoriteLimitKey)
-	}
-	if err != nil {
-		return 0, fmt.Errorf("favorites: load %s: %w", favoriteLimitKey, err)
-	}
-	return parseFavoriteLimit([]byte(raw), level)
-}
-
-// parseFavoriteLimit 解析 FAVORITE_STOCKS_LIMIT 的 JSONB value，回傳該 member_level 的上限。
-// JSON 格式錯誤、找不到該 level、值不是 >= 0 的整數，都回傳 error。
-func parseFavoriteLimit(raw []byte, level int) (int, error) {
-	var limits map[string]int
-	if err := json.Unmarshal(raw, &limits); err != nil {
-		return 0, fmt.Errorf("favorites: parse %s: %w", favoriteLimitKey, err)
-	}
-	limit, ok := limits[strconv.Itoa(level)]
-	if !ok {
-		return 0, fmt.Errorf("favorites: %s has no limit for member_level %d", favoriteLimitKey, level)
-	}
-	if limit < 0 {
-		return 0, fmt.Errorf("favorites: %s limit for member_level %d is negative: %d", favoriteLimitKey, level, limit)
-	}
-	return limit, nil
 }
 
 // favoritesServerError records err for slog-gin and responds 500.

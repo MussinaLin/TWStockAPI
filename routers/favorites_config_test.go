@@ -65,3 +65,40 @@ func TestGroupName(t *testing.T) {
 		assert.Equal(t, want, groupName(n), "groupName(%d)", n)
 	}
 }
+
+func TestNormalizeGroupName(t *testing.T) {
+	valid := map[string]string{
+		"科技股":            "科技股",
+		"  科技股  ":        "科技股",
+		"　科技股　":          "科技股",
+		"\t科技股\n":        "科技股",
+		"科技 股":           "科技 股",
+		"一二三四五六七八九十":     "一二三四五六七八九十",
+		"abcdefghij":     "abcdefghij",
+		"  一二三四五六七八九十  ": "一二三四五六七八九十",
+		"群組三":            "群組三",
+		"📈":              "📈",
+	}
+	for raw, want := range valid {
+		got, ok := normalizeGroupName(raw)
+		assert.True(t, ok, "normalizeGroupName(%q) should be valid", raw)
+		assert.Equal(t, want, got, "normalizeGroupName(%q)", raw)
+	}
+
+	invalid := []string{
+		"一二三四五六七八九十一",
+		"abcdefghijk",
+		"",
+		"   ",
+		"　",
+		"科技\n股",
+		"科技\t股",
+		"科技\u0000股",
+		"\xff",
+	}
+	for _, raw := range invalid {
+		got, ok := normalizeGroupName(raw)
+		assert.False(t, ok, "normalizeGroupName(%q) should be invalid", raw)
+		assert.Equal(t, "", got, "normalizeGroupName(%q)", raw)
+	}
+}

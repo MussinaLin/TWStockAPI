@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -78,4 +81,23 @@ func groupName(n int) string {
 		s += "十"
 	}
 	return "群組" + s + chineseDigits[ones]
+}
+
+// maxGroupNameLen 是自訂群組名稱的最大字元數（以 Unicode code point 計），
+// 與 user_favorite_groups.name 的 VARCHAR(10) 一致。
+const maxGroupNameLen = 10
+
+// normalizeGroupName 去掉名稱前後的空白（包括全形空白）後檢查：必須是合法的 UTF-8、
+// 有 1 到 maxGroupNameLen 個字元、不含控制字元。合法時回傳去掉空白後的名稱與 true。
+func normalizeGroupName(raw string) (string, bool) {
+	name := strings.TrimSpace(raw)
+	if name == "" || !utf8.ValidString(name) || utf8.RuneCountInString(name) > maxGroupNameLen {
+		return "", false
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return "", false
+		}
+	}
+	return name, true
 }

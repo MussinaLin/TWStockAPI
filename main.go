@@ -41,7 +41,7 @@ func main() {
 	r.Use(gin.Recovery())
 	r.Use(cors.New(cors.Config{
 		AllowOrigins: []string{"https://darvishkzone.com", "https://dev.darvishkzone.com"},
-		AllowMethods: []string{"GET", "POST", "DELETE"},
+		AllowMethods: []string{"GET", "POST", "PUT", "DELETE"},
 		AllowHeaders: []string{"Origin", "Content-Type", "Authorization"},
 	}))
 

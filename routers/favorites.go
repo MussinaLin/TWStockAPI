@@ -23,6 +23,7 @@ func RegisterFavorites(rg *gin.RouterGroup, requireLogin gin.HandlerFunc) {
 	g := rg.Group("/favorites", requireLogin)
 	g.GET("", listFavorites)
 	g.POST("/groups/:group_no", addFavorite)
+	g.PUT("/groups/:group_no", renameFavoriteGroup)
 	g.DELETE("/groups/:group_no/:symbol", deleteFavorite)
 }
 
@@ -45,6 +46,16 @@ type favoriteGroupItem struct {
 	Symbol      string    `json:"symbol"`
 	Name        string    `json:"name"`
 	CreatedTime time.Time `json:"created_time"`
+}
+
+type renameFavoriteGroupRequest struct {
+	Name string `json:"name"`
+}
+
+// favoriteGroupName is the PUT response: a group and its custom name.
+type favoriteGroupName struct {
+	GroupNo int    `json:"group_no"`
+	Name    string `json:"name"`
 }
 
 // querier is satisfied by both *pgxpool.Pool and pgx.Tx.
@@ -293,6 +304,53 @@ func deleteFavorite(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// renameFavoriteGroup 設定群組的自訂名稱；再改一次會取代原本的名稱。
+// 改名沒有數量上限要維護，所以不開 transaction、不鎖 user 的 row，同時改名以後寫入的為準。
+func renameFavoriteGroup(c *gin.Context) {
+	user, ok := auth.CurrentUser(c)
+	if !ok {
+		favoritesServerError(c, errors.New("favorites: no authenticated user"))
+		return
+	}
+	groupNo, ok := parseGroupNo(c)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	var req renameFavoriteGroupRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	name, ok := normalizeGroupName(req.Name)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	ctx := c.Request.Context()
+
+	rule, err := loadUserRule(ctx, db.Pool(), selectMemberLevel, user.ID)
+	if err != nil {
+		respondRuleError(c, err)
+		return
+	}
+	if groupNo > rule.Groups {
+		c.JSON(http.StatusNotFound, gin.H{"error": "group not found"})
+		return
+	}
+
+	_, err = db.Pool().Exec(ctx,
+		`INSERT INTO user_favorite_groups (user_id, group_no, name)
+		VALUES ($1::uuid, $2, $3)
+		ON CONFLICT (user_id, group_no) DO UPDATE SET name = EXCLUDED.name, updated_time = NOW()`,
+		user.ID, groupNo, name)
+	if err != nil {
+		favoritesServerError(c, fmt.Errorf("favorites: rename group: %w", err))
+		return
+	}
+	c.JSON(http.StatusOK, favoriteGroupName{GroupNo: groupNo, Name: name})
 }
 
 // favoritesServerError records err for slog-gin and responds 500.

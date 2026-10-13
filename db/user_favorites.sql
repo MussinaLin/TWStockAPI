@@ -1,4 +1,4 @@
--- 我的最愛個股（TWStockAPI 擁有）；可重複執行
+-- 我的最愛（TWStockAPI 擁有）；可重複執行
 -- 全新環境：psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/user_favorites.sql
 -- 套用過舊版（單一清單）的環境：改跑 db/user_favorites_v2_migration.sql
 
@@ -18,11 +18,21 @@ INSERT INTO user_config (key, value, description) VALUES
    '各 member_level 的我的最愛群組數與每組個股上限')
 ON CONFLICT (key) DO NOTHING;
 
--- user 的我的最愛個股；group_no 從 1 開始，群組名稱由後端依 group_no 產生
+-- user 的我的最愛個股；group_no 從 1 開始。預設群組名稱由後端依 group_no 產生，自訂名稱存在 user_favorite_groups
 CREATE TABLE IF NOT EXISTS user_favorite_stocks (
     user_id      UUID        NOT NULL REFERENCES users(id)      ON DELETE CASCADE,
     group_no     SMALLINT    NOT NULL CHECK (group_no >= 1),
     symbol       VARCHAR(10) NOT NULL REFERENCES stocks(symbol) ON DELETE CASCADE,
     created_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (user_id, group_no, symbol)
+);
+
+-- user 自訂的群組名稱；只存改過名的群組，沒有資料的群組使用預設名稱（群組一、群組二……）
+CREATE TABLE IF NOT EXISTS user_favorite_groups (
+    user_id      UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    group_no     SMALLINT    NOT NULL CHECK (group_no >= 1),
+    name         VARCHAR(10) NOT NULL CHECK (name <> ''),
+    created_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, group_no)
 );

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"main/db"
 
@@ -283,4 +284,96 @@ func TestRenameFavoriteGroup_UserGone(t *testing.T) {
 	status, body := doJSONBody(t, newFavoritesRouter(uuid.NewString()), "PUT", groupPath(1), `{"name":"科技股"}`)
 	assert.Equal(t, 401, status)
 	assert.Equal(t, map[string]any{"error": "unauthorized"}, body)
+}
+
+// ── GET /api/favorites with custom names ──
+
+func TestListFavorites_CustomNames(t *testing.T) {
+	rule := groupRuleFor(t, 0)
+	if rule.Groups < 3 {
+		t.Skipf("level 0 has %d groups; this test needs at least 3", rule.Groups)
+	}
+	symbols := enabledSymbols(t, 1)
+	userID := newFavoritesUser(t, 0)
+	addFavoriteRow(t, userID, 1, symbols[0], time.Now())
+	setGroupNameRow(t, userID, 1, "科技股")
+	setGroupNameRow(t, userID, 3, "群組一")
+
+	status, body := doJSON(t, newFavoritesRouter(userID), "GET", "/api/favorites")
+	require.Equal(t, 200, status)
+	groups := groupsOf(t, body)
+	require.Len(t, groups, rule.Groups)
+	for i, g := range groups {
+		want := groupName(i + 1)
+		switch i + 1 {
+		case 1:
+			want = "科技股"
+		case 3:
+			want = "群組一"
+		}
+		assert.Equal(t, want, g["name"], "group %d", i+1)
+		assert.Equal(t, float64(i+1), g["group_no"])
+	}
+	assert.Equal(t, float64(1), groups[0]["count"])
+	items := groups[0]["items"].([]any)
+	require.Len(t, items, 1)
+	assert.Equal(t, symbols[0], items[0].(map[string]any)["symbol"])
+}
+
+func TestListFavorites_RenamedViaPut(t *testing.T) {
+	rule := groupRuleFor(t, 0)
+	if rule.Groups < 3 {
+		t.Skipf("level 0 has %d groups; this test needs at least 3", rule.Groups)
+	}
+	userID := newFavoritesUser(t, 0)
+	r := newFavoritesRouter(userID)
+
+	status, _ := doJSONBody(t, r, "PUT", groupPath(1), `{"name":"群組三"}`)
+	require.Equal(t, 200, status)
+
+	status, body := doJSON(t, r, "GET", "/api/favorites")
+	require.Equal(t, 200, status)
+	groups := groupsOf(t, body)
+	assert.Equal(t, "群組三", groups[0]["name"])
+	assert.Equal(t, groupName(2), groups[1]["name"])
+	assert.Equal(t, "群組三", groups[2]["name"])
+}
+
+func TestListFavorites_CustomNamesOnlyOwn(t *testing.T) {
+	owner := newFavoritesUser(t, 0)
+	other := newFavoritesUser(t, 0)
+	setGroupNameRow(t, owner, 1, "科技股")
+
+	status, body := doJSON(t, newFavoritesRouter(other), "GET", "/api/favorites")
+	require.Equal(t, 200, status)
+	assert.Equal(t, groupName(1), groupsOf(t, body)[0]["name"])
+}
+
+func TestListFavorites_CustomNameHiddenAfterDowngrade(t *testing.T) {
+	rule0 := groupRuleFor(t, 0)
+	rule1 := groupRuleFor(t, 1)
+	if rule0.Groups >= 8 || rule1.Groups < 8 {
+		t.Skipf("needs level 0 < 8 groups and level 1 >= 8 groups, got %d and %d", rule0.Groups, rule1.Groups)
+	}
+	userID := newFavoritesUser(t, 0)
+	setGroupNameRow(t, userID, 8, "隱藏的")
+	r := newFavoritesRouter(userID)
+
+	status, body := doJSON(t, r, "GET", "/api/favorites")
+	require.Equal(t, 200, status)
+	groups := groupsOf(t, body)
+	require.Len(t, groups, rule0.Groups)
+	for _, g := range groups {
+		assert.NotEqual(t, "隱藏的", g["name"])
+	}
+
+	_, err := db.Pool().Exec(context.Background(),
+		"UPDATE users SET member_level = 1 WHERE id = $1::uuid", userID)
+	require.NoError(t, err)
+
+	status, body = doJSON(t, r, "GET", "/api/favorites")
+	require.Equal(t, 200, status)
+	groups = groupsOf(t, body)
+	require.Len(t, groups, rule1.Groups)
+	assert.Equal(t, "隱藏的", groups[7]["name"])
 }

@@ -111,8 +111,8 @@ func invalidSymbol(s string) bool {
 	return strings.ContainsRune(s, 0) || !utf8.ValidString(s)
 }
 
-// listFavorites 回傳目前等級的所有群組（包括空的群組）與群組底下的個股。
-// group_no 超過目前群組數的資料（降級後）保留在 DB，但不回傳。
+// listFavorites 回傳目前等級的所有群組（包括空的群組）與群組底下的個股；有自訂名稱的
+// 群組回傳自訂名稱。group_no 超過目前群組數的資料與名稱（降級後）保留在 DB，但不回傳。
 func listFavorites(c *gin.Context) {
 	user, ok := auth.CurrentUser(c)
 	if !ok {
@@ -130,6 +130,10 @@ func listFavorites(c *gin.Context) {
 	groups := make([]favoriteGroup, rule.Groups)
 	for i := range groups {
 		groups[i] = favoriteGroup{GroupNo: i + 1, Name: groupName(i + 1), Items: []favoriteItem{}}
+	}
+	if err := applyCustomGroupNames(ctx, user.ID, groups); err != nil {
+		favoritesServerError(c, err)
+		return
 	}
 
 	rows, err := db.Pool().Query(ctx,
@@ -164,6 +168,27 @@ func listFavorites(c *gin.Context) {
 		"max_stocks_per_group": rule.StocksPerGroup,
 		"groups":               groups,
 	})
+}
+
+// applyCustomGroupNames 用 user_favorite_groups 的自訂名稱取代 groups 的預設名稱；
+// 只查 groups 範圍內（group_no ≤ len(groups)）的群組。
+func applyCustomGroupNames(ctx context.Context, userID string, groups []favoriteGroup) error {
+	rows, err := db.Pool().Query(ctx,
+		`SELECT group_no, name FROM user_favorite_groups
+		WHERE user_id = $1::uuid AND group_no <= $2`, userID, len(groups))
+	if err != nil {
+		return fmt.Errorf("favorites: list group names: %w", err)
+	}
+	var groupNo int
+	var name string
+	_, err = pgx.ForEachRow(rows, []any{&groupNo, &name}, func() error {
+		groups[groupNo-1].Name = name
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("favorites: list group names: %w", err)
+	}
+	return nil
 }
 
 type addFavoriteRequest struct {

@@ -503,7 +503,7 @@ axios 會自動帶 `Content-Type: application/json`，`204` 也不會解析失�
 | 收到 `409` | 用回傳的 `limit` 更新每組上限 |
 | 收到 `404 group not found` | 重新 GET（群組數可能因等級調整而改變） |
 | 移到其他群組 | 沒有「移動」API：先 POST 到新群組，成功後再 DELETE 舊群組（見 §4.3 `onMove`） |
-| 改名 | 在群組名稱旁放編輯按鈕（或雙擊名稱）原地編輯；Enter 送出、Esc 取消；送出前用 `normalizeGroupName` 檢查（見 §4.3 `onRename`） |
+| 改名 | 在群組名稱旁放編輯按鈕（或雙擊名稱）原地編輯；Enter 送出、Esc 取消；送出前用 `normalizeGroupName` 檢查（見 §4.3 `onRename`）。**注音、倉頡等輸入法組字時按的 Enter 是選字，不能送出**：`keydown` 時 `e.isComposing` 為 `true` 或 `e.keyCode === 229`（Safari 要靠後者）就略過 |
 | 名稱字數 | 顯示「`[...value].length` / 10」的計數。`<input maxlength>` 以 UTF-16 計算，部分 emoji 會被提早擋下，建議用計數提示加上送出前檢查 |
 | 改名成功 | 用回傳的 `name` 更新畫面（後端會去掉前後空白），不需要重新 GET |
 | 顯示群組名稱 | 一律當成純文字顯示，不要用 `innerHTML` |

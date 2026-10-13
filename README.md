@@ -11,7 +11,7 @@ tags:
 
 台股分析資料 REST API Server，使用 Go + [Gin](https://gin-gonic.com/) 框架。
 
-資料來源為 PostgreSQL，由 [TWStockAnalysis](../TWStockAnalysis) 批次作業負責寫入。唯一的例外是「我的最愛」（`/api/favorites`），由本服務寫入 `user_favorite_stocks`。
+資料來源為 PostgreSQL，由 [TWStockAnalysis](../TWStockAnalysis) 批次作業負責寫入。唯一的例外是「我的最愛」（`/api/favorites`），由本服務寫入 `user_favorite_stocks` 與 `user_favorite_groups`。
 
 [![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template/dTvvSf)
 
@@ -726,12 +726,13 @@ UPDATE config SET value = 'true', updated_time = now() WHERE key = 'JWT_TOKEN_EN
 
 **一律需要登入**：不論 `JWT_TOKEN_ENABLE` 為何，都必須帶 `Authorization: Bearer <token>`；驗證失敗的回應見[認證](#認證)。
 
-我的最愛分成固定數量的群組（群組一、群組二……），群組數與每組上限依 `users.member_level` 而定；同一檔股票可以放在多個群組。
+我的最愛分成固定數量的群組（群組一、群組二……），群組數與每組上限依 `users.member_level` 而定；同一檔股票可以放在多個群組。群組可以自訂名稱（存在 `user_favorite_groups`，只存改過名的群組）。
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/favorites` | 查詢自己所有的群組與群組底下的個股 |
 | POST | `/api/favorites/groups/:group_no` | 把一檔股票加入指定群組 |
+| PUT | `/api/favorites/groups/:group_no` | 自訂群組名稱 |
 | DELETE | `/api/favorites/groups/:group_no/:symbol` | 從指定群組移除一檔股票 |
 
 規則設定在 `user_config` 表的 `FAVORITE_GROUPS`（JSONB，key 為 member_level 字串；`is_og_member` 不影響）。修改規則：
@@ -743,9 +744,9 @@ SET value = '{"0": {"groups": 5, "stocks_per_group": 5}, "1": {"groups": 10, "st
 WHERE key = 'FAVORITE_GROUPS';
 ```
 
-`groups` 必須在 1–99、`stocks_per_group` ≥ 0。找不到設定、找不到該 level 或格式錯誤時，三支 API 都回 `500`。會員等級調降時，超過新群組數的資料會保留但不顯示；群組內超過上限時照樣列出，但不能再加入。
+`groups` 必須在 1–99、`stocks_per_group` ≥ 0。找不到設定、找不到該 level 或格式錯誤時，四支 API 都回 `500`。會員等級調降時，超過新群組數的資料與自訂名稱會保留但不顯示；群組內超過上限時照樣列出，但不能再加入。
 
-**資料表（部署新版程式之前先執行）：** 全新環境（例如 production）執行 `db/user_favorites.sql`，可重複執行。套用過舊版（單一清單）的環境改執行**一次** `db/user_favorites_v2_migration.sql`（**會刪除所有我的最愛資料，不可重複執行**；staging 已執行過）。程式已部署但 SQL 還沒執行時，三支 API 都會回 `500`。
+**資料表（部署新版程式之前先執行）：** 全新環境（例如 production）執行 `db/user_favorites.sql`，可重複執行；已套用群組版 schema 的環境（例如 staging）重跑一次即可加上 `user_favorite_groups`，不會刪資料。套用過舊版（單一清單）的環境改執行**一次** `db/user_favorites_v2_migration.sql`（**會刪除所有我的最愛資料，不可重複執行**；staging 已執行過）。程式已部署但 SQL 還沒執行時，API 會回 `500`。
 
 前端串接方式見 [docs/frontend-favorites-integration.md](docs/frontend-favorites-integration.md)。
 
@@ -773,6 +774,7 @@ WHERE key = 'FAVORITE_GROUPS';
 ```
 
 - `groups` 固定有 `max_groups` 個，依 `group_no` 由小到大；空的群組 `items` 為 `[]`。
+- `name` 為使用者自訂的名稱；沒改過名的群組為預設名稱（群組一、群組二……）。
 - 群組內依 `created_time` 由新到舊排序；加入後被停用（`stocks.enabled = false`）的股票仍會列出。
 
 #### `POST /api/favorites/groups/:group_no`
@@ -795,6 +797,26 @@ WHERE key = 'FAVORITE_GROUPS';
 | `404` | `{"error":"group not found"}` | `group_no` 超過目前等級的群組數 |
 | `404` | `{"error":"stock not found"}` | 股票不存在或未啟用 |
 | `409` | `{"error":"favorite group full","limit":5}` | 群組已滿 |
+
+#### `PUT /api/favorites/groups/:group_no`
+
+自訂群組名稱；再改一次會取代原本的名稱。
+
+**Path Parameters:** `group_no` — 群組編號（從 1 開始）
+
+**Request Body:**
+
+```json
+{ "name": "科技股" }
+```
+
+`name` 會先去掉前後空白（包括全形空白），去掉後必須有 1–10 個字元（以 Unicode 字元計，中英文都算 1 個），不能含換行等控制字元。不同群組可以取一樣的名字。沒有還原預設名稱的 API；想改回原名就把名稱設成「群組一」等。
+
+| HTTP | Body | 意義 |
+|------|------|------|
+| `200` | `{"group_no":1,"name":"科技股"}` | 改名成功（`name` 為去掉空白後的值；名稱跟原本一樣也回 `200`） |
+| `400` | `{"error":"invalid request"}` | `group_no` 不是 ≥ 1 的整數、body 不是合法的 JSON、`name` 不是字串，或名稱不符合上述規則 |
+| `404` | `{"error":"group not found"}` | `group_no` 超過目前等級的群組數 |
 
 #### `DELETE /api/favorites/groups/:group_no/:symbol`
 

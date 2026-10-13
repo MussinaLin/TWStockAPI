@@ -1,11 +1,13 @@
 # 前端串接：我的最愛群組（`/api/favorites`）
 
-本文件給**前端**參考，說明如何串接 TWStockAPI 的「我的最愛」群組功能：取得所有群組、把股票加入群組、從群組移除。
+本文件給**前端**參考，說明如何串接 TWStockAPI 的「我的最愛」群組功能：取得所有群組、把股票加入群組、從群組移除、幫群組改名。
 
 - 登入與帶 token 的方式：見 [frontend-api-auth-integration.md](frontend-api-auth-integration.md)
 - 完整 API 規格：見 TWStockAPI `README.md` 的 Favorites 段落
 
 > **改版說明（2026-10-12）：** 我的最愛從「單一清單」改成「群組」。舊的 `POST /api/favorites`、`DELETE /api/favorites/:symbol` 已移除，GET 的回應格式也改了。舊版留下的資料已清除。從舊版改過來時要調整的地方見第 8 節。
+>
+> **更新（2026-10-13）：** 群組可以自訂名稱：新增 `PUT /api/favorites/groups/:group_no`（§3.4）。GET 的回應格式不變，`groups[].name` 改成回傳自訂名稱（沒改過名的群組仍是「群組一」等）。
 
 ---
 
@@ -16,7 +18,7 @@
 | 用途 | 使用者把個股分組收藏，方便快速選取 |
 | 歸屬 | 每個使用者各自一份，只看得到、也只改得到自己的 |
 | 登入 | **一律需要登入**：不論後端 `JWT_TOKEN_ENABLE` 開關怎麼設，都必須帶 `Authorization: Bearer <token>` |
-| 群組 | 數量固定，依會員等級（`member_level`）而定；名稱固定為「群組一、群組二……」，**不能新增、刪除或改名** |
+| 群組 | 數量固定，依會員等級（`member_level`）而定，**不能新增或刪除**；預設名稱為「群組一、群組二……」，**可以改名**（§3.4） |
 | 每組上限 | 依會員等級而定；**請一律用 GET 回傳的 `max_groups`、`max_stocks_per_group`，不要寫死在前端** |
 | 重複 | 同一檔股票**可以放在多個群組**；同一個群組裡不會重複 |
 | 排序 | 群組依編號排列；群組內依加入時間，最新加入的排最前面 |
@@ -37,6 +39,7 @@
 |--------|------|------|
 | `GET` | `/api/favorites` | 取得所有群組與群組底下的個股 |
 | `POST` | `/api/favorites/groups/:group_no` | 把一檔股票加入指定群組 |
+| `PUT` | `/api/favorites/groups/:group_no` | 幫群組改名 |
 | `DELETE` | `/api/favorites/groups/:group_no/:symbol` | 從指定群組移除一檔股票 |
 
 - `group_no` 是群組編號，**從 1 開始**（群組一 = `1`）。回應裡的 `group_no` 一律是 number；前端比對時記得把 `<select>` 等來源的字串轉成 number（見 §4.3 `groupOf`）。
@@ -79,7 +82,7 @@
 | `max_stocks_per_group` | number | 每個群組最多幾檔 |
 | `groups` | array | **固定有 `max_groups` 個**，依 `group_no` 由小到大；空的群組也會列出 |
 | `groups[].group_no` | number | 群組編號，從 1 開始；呼叫 POST / DELETE 時用這個值 |
-| `groups[].name` | string | 群組名稱（「群組一」……），直接顯示即可 |
+| `groups[].name` | string | 群組名稱：使用者改過名時為自訂名稱，否則為「群組一」……；直接顯示即可（請當成純文字顯示，見 §3.4） |
 | `groups[].count` | number | 這個群組目前的數量（等於 `items.length`） |
 | `groups[].items` | array | 群組內的個股，依 `created_time` 由新到舊；**空的群組是 `[]`，不會是 `null`** |
 | `items[].symbol` | string | 股票代號 |
@@ -89,7 +92,7 @@
 注意：
 
 - 股票加入之後如果被後端停用，**仍然會出現在群組中**，可以正常移除。
-- 會員等級被調降時，超過新群組數的群組不會出現（資料保留，升級回來會再出現）；群組內的數量可能大於 `max_stocks_per_group`（例如 `9/5`），這時可以移除，但不能再加入。
+- 會員等級被調降時，超過新群組數的群組不會出現（資料與自訂名稱都保留，升級回來會再出現）；群組內的數量可能大於 `max_stocks_per_group`（例如 `9/5`），這時可以移除，但不能再加入。
 
 ### 3.2 `POST /api/favorites/groups/:group_no` — 加入群組
 
@@ -143,6 +146,40 @@ Authorization: Bearer <token>
 - 重複送出是安全的，不會出錯。
 - `symbol` 放在 URL path，請用 `encodeURIComponent(symbol)` 編碼。
 - **`204` 沒有 body，不要呼叫 `res.json()`**（見第 4 節）。
+
+### 3.4 `PUT /api/favorites/groups/:group_no` — 幫群組改名
+
+**Request：**
+
+```
+PUT /api/favorites/groups/1
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{ "name": "科技股" }
+```
+
+名稱規則（**前端請先檢查，見 §4.3 `normalizeGroupName`**）：
+
+- 前後的空白會被去掉（包括全形空白）；去掉後**不能是空的**。
+- 最多 **10 個字**，中文、英文、數字、標點都算 1 個字。以 Unicode 字元（code point）計：請用 `[...name].length`，不要用 `name.length`（部分 emoji 會被算成 2）。由多個字元組成的 emoji（例如 👨‍👩‍👧、國旗）會算成好幾個字。
+- 不能含換行、tab 等控制字元。
+- 不同群組可以取一樣的名字。
+- **沒有「還原預設名稱」的 API**：想改回原名，就把名稱設成「群組一」等。
+
+**Responses：**
+
+| HTTP | Body | 意義 |
+|------|------|------|
+| `200` | `{"group_no":1,"name":"科技股"}` | 改名成功；`name` 是後端實際存下的名稱（去掉前後空白後）。名稱跟原本一樣也回 `200` |
+| `400` | `{"error":"invalid request"}` | `group_no` 不是 ≥ 1 的整數；body 不是合法的 JSON、沒有 `name`、`name` 不是字串，或名稱不符合上述規則 |
+| `404` | `{"error":"group not found"}` | `group_no` 超過這個使用者的群組數 → 重新 GET |
+| `401` | 同 §3.2 | 未登入、token 過期或無效 |
+| `500` | `{"detail":"Internal server error"}` | 後端錯誤 |
+
+- 重複送出是安全的；同時送出多次時，以最後寫入的為準。
+- 改名不影響群組裡的股票。
+- 名稱是使用者輸入的內容，可能含 `<`、`&` 等字元，**請當成純文字顯示**（例如 React 的 `{name}`、`textContent`），不要用 `innerHTML`。
 
 ---
 
@@ -230,6 +267,17 @@ export async function removeFromGroup(groupNo, symbol) {
     method: "DELETE",
   });
 }
+
+/**
+ * 幫群組改名；回傳後端實際存下的名稱（去掉前後空白後）。
+ * @returns {Promise<FavoriteGroupName>}
+ */
+export function renameGroup(groupNo, name) {
+  return apiFetch(`/api/favorites/groups/${groupNo}`, {
+    method: "PUT",
+    body: JSON.stringify({ name }),
+  });
+}
 ```
 
 TypeScript 型別（參考）：
@@ -243,7 +291,7 @@ export interface FavoriteItem {
 
 export interface FavoriteGroup {
   group_no: number; // 從 1 開始
-  name: string; // "群組一"……
+  name: string; // 自訂名稱，或預設的 "群組一"……
   count: number;
   items: FavoriteItem[];
 }
@@ -258,6 +306,11 @@ export interface FavoriteGroupItem extends FavoriteItem {
   group_no: number;
 }
 
+export interface FavoriteGroupName {
+  group_no: number;
+  name: string;
+}
+
 export type FavoriteError =
   | { error: "invalid request" }
   | { error: "group not found" }
@@ -269,7 +322,7 @@ export type FavoriteError =
 
 ```js
 import { AuthError, ApiError } from "./api";
-import { listFavoriteGroups, addToGroup, removeFromGroup } from "./favorites";
+import { listFavoriteGroups, addToGroup, removeFromGroup, renameGroup } from "./favorites";
 
 const state = { maxGroups: 0, maxPerGroup: 0, groups: [] };
 
@@ -352,6 +405,46 @@ export async function onMove(fromGroupNo, toGroupNo, symbol) {
     await onRemove(fromGroupNo, symbol);
   }
 }
+
+// 名稱規則與後端相同：去掉前後空白後 1–10 個字（以 code point 計），不含控制字元。
+// 合法時回傳去掉空白後的名稱，不合法時回傳 null。
+export const MAX_GROUP_NAME_LENGTH = 10;
+
+export function normalizeGroupName(input) {
+  const name = input.trim();
+  const length = [...name].length;
+  if (length === 0 || length > MAX_GROUP_NAME_LENGTH || /\p{Cc}/u.test(name)) {
+    return null;
+  }
+  return name;
+}
+
+// 改名成功回傳 true；名稱不合法或失敗時顯示訊息並回傳 false（讓編輯框保持開啟）
+export async function onRename(groupNo, input) {
+  const name = normalizeGroupName(input);
+  if (name === null) {
+    toast(`群組名稱需為 1–${MAX_GROUP_NAME_LENGTH} 個字，且不能含換行`);
+    return false;
+  }
+  try {
+    const saved = await renameGroup(groupNo, name);
+    const g = groupOf(saved.group_no);
+    if (g) g.name = saved.name; // 用後端存下的名稱更新
+    return true;
+  } catch (err) {
+    if (err instanceof AuthError) {
+      redirectToLogin();
+    } else if (err instanceof ApiError && err.status === 404) {
+      await loadFavorites(); // 群組資訊過期（例如等級剛被調整）
+      toast("群組已變更，請重新選擇");
+    } else if (err instanceof ApiError && err.status === 400) {
+      toast(`群組名稱需為 1–${MAX_GROUP_NAME_LENGTH} 個字，且不能含換行`);
+    } else {
+      toast("改名失敗，請稍後再試");
+    }
+    return false;
+  }
+}
 ```
 
 ### 4.4 axios 版
@@ -368,6 +461,9 @@ export const addToGroup = (groupNo, symbol) =>
 
 export const removeFromGroup = (groupNo, symbol) =>
   api.delete(`/api/favorites/groups/${groupNo}/${encodeURIComponent(symbol)}`); // 204，r.data 為 ""
+
+export const renameGroup = (groupNo, name) =>
+  api.put(`/api/favorites/groups/${groupNo}`, { name }).then((r) => r.data); // 200 { group_no, name }
 
 // 群組資訊過期時重新取得（與 §4.3 的 loadFavorites 相同）
 async function reloadFavorites() {
@@ -398,7 +494,7 @@ axios 會自動帶 `Content-Type: application/json`，`204` 也不會解析失�
 |------|----------|
 | 未登入 | 不要呼叫 `/api/favorites`（一定回 `401`）；收藏按鈕改成「登入後使用」或點了導去登入 |
 | 進入頁面 / 登入後 | 呼叫一次 `GET /api/favorites`，用結果畫出所有群組（包括空的） |
-| 群組分頁 / 清單 | 直接用 `groups` 的順序與 `name`；不要自己產生「群組一」等名稱 |
+| 群組分頁 / 清單 | 直接用 `groups` 的順序與 `name`；不要自己產生「群組一」等名稱（使用者可能改過名） |
 | 加入股票 | 點收藏時讓使用者選群組；用 `groupsContaining(symbol)` 標出已經在哪些群組 |
 | 顯示數量 | 每個群組顯示 `items.length` / `max_stocks_per_group`，例如「群組一 2 / 5」 |
 | 群組已滿 | `items.length >= max_stocks_per_group` 時，選單裡該群組設成不可選並標示「已滿」；仍然可以移除 |
@@ -407,6 +503,10 @@ axios 會自動帶 `Content-Type: application/json`，`204` 也不會解析失�
 | 收到 `409` | 用回傳的 `limit` 更新每組上限 |
 | 收到 `404 group not found` | 重新 GET（群組數可能因等級調整而改變） |
 | 移到其他群組 | 沒有「移動」API：先 POST 到新群組，成功後再 DELETE 舊群組（見 §4.3 `onMove`） |
+| 改名 | 在群組名稱旁放編輯按鈕（或雙擊名稱）原地編輯；Enter 送出、Esc 取消；送出前用 `normalizeGroupName` 檢查（見 §4.3 `onRename`） |
+| 名稱字數 | 顯示「`[...value].length` / 10」的計數。`<input maxlength>` 以 UTF-16 計算，部分 emoji 會被提早擋下，建議用計數提示加上送出前檢查 |
+| 改名成功 | 用回傳的 `name` 更新畫面（後端會去掉前後空白），不需要重新 GET |
+| 顯示群組名稱 | 一律當成純文字顯示，不要用 `innerHTML` |
 | 被停用的股票 | 仍然會出現在群組中；點進去沒有行情資料屬正常現象，可以讓使用者移除 |
 | 顯示時間 | `new Date(item.created_time).toLocaleString("zh-TW")` |
 
@@ -414,9 +514,9 @@ axios 會自動帶 `Content-Type: application/json`，`204` 也不會解析失�
 
 ## 6. CORS
 
-`GET`、`POST`、`DELETE` 都在允許清單內（見 [auth 文件 §6](frontend-api-auth-integration.md#6-cors)）。
+`GET`、`POST`、`PUT`、`DELETE` 都在允許清單內（見 [auth 文件 §6](frontend-api-auth-integration.md#6-cors)）。
 
-- `POST` 帶 `Content-Type: application/json` 與 `Authorization`，`DELETE` 帶 `Authorization`，瀏覽器都會先送 `OPTIONS` preflight，後端回 `204` 屬正常現象。
+- `POST`、`PUT` 帶 `Content-Type: application/json` 與 `Authorization`，`DELETE` 帶 `Authorization`，瀏覽器都會先送 `OPTIONS` preflight，後端回 `204` 屬正常現象。
 - 本機開發要透過 dev server proxy（`localhost` 不在允許清單內）。
 
 ---
@@ -433,6 +533,10 @@ curl -H "Authorization: Bearer $TOKEN" $BASE/api/favorites
 # 把 2330 加入群組一
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"symbol":"2330"}' -w '\nHTTP %{http_code}\n' $BASE/api/favorites/groups/1
+
+# 把群組一改名為「科技股」
+curl -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"name":"科技股"}' -w '\nHTTP %{http_code}\n' $BASE/api/favorites/groups/1
 
 # 從群組一移除 2330
 curl -X DELETE -H "Authorization: Bearer $TOKEN" -w 'HTTP %{http_code}\n' $BASE/api/favorites/groups/1/2330
@@ -452,6 +556,7 @@ curl -X DELETE -H "Authorization: Bearer $TOKEN" -w 'HTTP %{http_code}\n' $BASE/
 | `409 {"error":"favorite limit reached","limit":10}` | `409 {"error":"favorite group full","limit":5}`（每組上限） |
 | 一檔股票只會出現一次 | 同一檔可以出現在多個群組 |
 | — | 新增 `404 {"error":"group not found"}`、`group_no` 格式錯誤的 `400` |
+| 群組名稱固定 | 新增 `PUT /api/favorites/groups/:group_no` 幫群組改名（§3.4）；GET 的 `name` 可能是自訂名稱 |
 
 舊版留下的我的最愛資料已清除，使用者需要重新加入。`apiFetch` 的調整（處理 `204`、保留錯誤 body）與上一版相同。
 
@@ -465,8 +570,11 @@ curl -X DELETE -H "Authorization: Bearer $TOKEN" -w 'HTTP %{http_code}\n' $BASE/
 | 呼叫舊的 `POST /api/favorites` 或 `DELETE /api/favorites/2330` 回 `404` | 舊 API 已移除，改用 `/api/favorites/groups/:group_no/...`（見第 8 節） |
 | `DELETE` 成功了但前端拋出 JSON 解析錯誤 | `204` 沒有 body，不要呼叫 `res.json()`（見 §4.1） |
 | `POST` 回 `400 invalid request` | `group_no` 傳了 `0`、`abc` 等不是 ≥ 1 的整數；body 沒有 `JSON.stringify`；`symbol` 送成數字（例如 `2330` 而不是 `"2330"`） |
-| `POST` / `DELETE` 回 `404 group not found` | `group_no` 超過這個使用者的群組數（例如 level 0 傳 `6`），或前端的群組資訊過期 → 重新 GET |
+| `POST` / `PUT` / `DELETE` 回 `404 group not found` | `group_no` 超過這個使用者的群組數（例如 level 0 傳 `6`），或前端的群組資訊過期 → 重新 GET |
 | `POST` 回 `404 stock not found`，但股票確實存在 | 該股票後端未啟用，或代號大小寫不一致 |
+| `PUT` 回 `400 invalid request` | 名稱去掉空白後是空的、超過 10 個字、含換行或 tab；body 沒有 `JSON.stringify`；`name` 送成數字或 `null` |
+| 輸入框看起來不到 10 個字，`PUT` 卻回 `400` | 部分 emoji（例如 👨‍👩‍👧、國旗）由多個字元組成，後端會算成多個字 |
+| 改名後想改回「群組一」 | 沒有還原 API；直接把名稱改成「群組一」 |
 | `POST` 回 `409`，但畫面上這個群組還沒滿 | 前端資料過期（例如在別的裝置加過）→ 重新 GET |
 | 某個群組的數量大於每組上限 | 會員等級被調降，屬正常；可以移除，但不能再加入 |
 | 等級調降後少了幾個群組 | 屬正常：超過新群組數的群組不會顯示，資料保留，升級後會再出現 |

@@ -186,7 +186,7 @@ TWStockAPI 目前允許的跨域設定：
 | 項目 | 值 |
 |------|----|
 | Origins | `https://darvishkzone.com`、`https://dev.darvishkzone.com` |
-| Methods | `GET`、`POST`、`DELETE` |
+| Methods | `GET`、`POST`、`PUT`、`DELETE` |
 | Headers | `Origin`、`Content-Type`、`Authorization` |
 
 - 帶 `Authorization` header 時，瀏覽器會先送一個 `OPTIONS` preflight，後端回 `204` 屬正常現象。

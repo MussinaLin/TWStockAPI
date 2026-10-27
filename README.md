@@ -234,10 +234,12 @@ UPDATE config SET value = 'true', updated_time = now() WHERE key = 'JWT_TOKEN_EN
     "foreign_net_5d_avg": 4500.0,
     "foreign_net_10d_avg": 3800.0,
     "foreign_net_15d_avg": 3200.0,
+    "foreign_net_20d_avg": 3000.0,
     "foreign_net_30d_avg": 2800.0,
     "trust_net_5d_avg": 1100.0,
     "trust_net_10d_avg": 950.0,
     "trust_net_15d_avg": 800.0,
+    "trust_net_20d_avg": 720.0,
     "trust_net_30d_avg": 650.0,
     "rsi_9": 62.5,
     "rsi_14": 58.3,
@@ -259,8 +261,8 @@ UPDATE config SET value = 'true', updated_time = now() WHERE key = 'JWT_TOKEN_EN
 |-------|------|-------------|
 | `price_limit_up` | bool | 是否漲停（`close` = `limit_up`）。無漲跌停資料時回 `false` |
 | `price_limit_down` | bool | 是否跌停（`close` = `limit_down`）。無漲跌停資料時回 `false` |
-| `foreign_net_{5,10,15,30}d_avg` | number | 外資買賣超的 5／10／15／30 日平均（張），負數為賣超 |
-| `trust_net_{5,10,15,30}d_avg` | number | 投信買賣超的 5／10／15／30 日平均（張），負數為賣超 |
+| `foreign_net_{5,10,15,20,30}d_avg` | number | 外資買賣超的 5／10／15／20／30 日平均（張），負數為賣超 |
+| `trust_net_{5,10,15,20,30}d_avg` | number | 投信買賣超的 5／10／15／20／30 日平均（張），負數為賣超 |
 
 #### `GET /api/daily/stock/:symbol`
 
@@ -306,10 +308,12 @@ UPDATE config SET value = 'true', updated_time = now() WHERE key = 'JWT_TOKEN_EN
     "foreign_net_5d_avg": 4500.0,
     "foreign_net_10d_avg": 3800.0,
     "foreign_net_15d_avg": 3200.0,
+    "foreign_net_20d_avg": 3000.0,
     "foreign_net_30d_avg": 2800.0,
     "trust_net_5d_avg": 1100.0,
     "trust_net_10d_avg": 950.0,
     "trust_net_15d_avg": 800.0,
+    "trust_net_20d_avg": 720.0,
     "trust_net_30d_avg": 650.0,
     "rsi_9": 62.5,
     "rsi_14": 58.3,

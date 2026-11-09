@@ -71,6 +71,7 @@ func main() {
 	routers.RegisterPeriod(api)
 	// Favorites always require login, even while JWT_TOKEN_ENABLE is off.
 	routers.RegisterFavorites(api, auth.RequireLogin(auth.PgxUserStore{}, jwtSecret))
+	routers.RegisterCustomSignals(api, auth.RequireLogin(auth.PgxUserStore{}, jwtSecret))
 
 	port := cmp.Or(os.Getenv("PORT"), "8080")
 	logger.Info("Server starting", slog.String("port", port))

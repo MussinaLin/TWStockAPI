@@ -250,7 +250,12 @@ UPDATE config SET value = 'true', updated_time = now() WHERE key = 'JWT_TOKEN_EN
     "bb_middle": 592.0,
     "bb_lower": 574.0,
     "bb_percent_b": 0.75,
-    "bb_bandwidth": 6.08
+    "bb_bandwidth": 6.08,
+    "kd_k": 68.5,
+    "kd_d": 61.2,
+    "ma5": 588.4,
+    "ma10": 580.1,
+    "ma20": 571.6
   }
 ]
 ```
@@ -263,6 +268,8 @@ UPDATE config SET value = 'true', updated_time = now() WHERE key = 'JWT_TOKEN_EN
 | `price_limit_down` | bool | 是否跌停（`close` = `limit_down`）。無漲跌停資料時回 `false` |
 | `foreign_net_{5,10,15,20,30}d_avg` | number | 外資買賣超的 5／10／15／20／30 日平均（張），負數為賣超 |
 | `trust_net_{5,10,15,20,30}d_avg` | number | 投信買賣超的 5／10／15／20／30 日平均（張），負數為賣超 |
+| `kd_k` / `kd_d` | number | KD 指標的 K 值／D 值（`stock_daily_indicators`），無資料時為 `null` |
+| `ma5` / `ma10` / `ma20` | number | 收盤價的 5／10／20 日均線（`stock_daily_statistics`），無資料時為 `null` |
 
 #### `GET /api/daily/stock/:symbol`
 
@@ -324,7 +331,12 @@ UPDATE config SET value = 'true', updated_time = now() WHERE key = 'JWT_TOKEN_EN
     "bb_middle": 592.0,
     "bb_lower": 574.0,
     "bb_percent_b": 0.75,
-    "bb_bandwidth": 6.08
+    "bb_bandwidth": 6.08,
+    "kd_k": 68.5,
+    "kd_d": 61.2,
+    "ma5": 588.4,
+    "ma10": 580.1,
+    "ma20": 571.6
   }
 ]
 ```

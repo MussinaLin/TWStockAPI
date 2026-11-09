@@ -64,7 +64,9 @@ const dailyColumns = `r.symbol, r.name, r.open, r.close, r.high, r.low, r.volume
 	i.rsi_9, i.rsi_14,
 	i.macd, i.macd_signal, i.macd_hist,
 	i.bb_upper, i.bb_middle, i.bb_lower,
-	i.bb_percent_b, i.bb_bandwidth`
+	i.bb_percent_b, i.bb_bandwidth,
+	i.kd_k, i.kd_d,
+	st.ma5, st.ma10, st.ma20`
 
 const dailyJoins = `FROM stock_daily_raw r
 	LEFT JOIN stock_daily_indicators i USING (symbol, trade_date)
@@ -114,7 +116,9 @@ func getStockHistory(c *gin.Context) {
 		i.rsi_9, i.rsi_14,
 		i.macd, i.macd_signal, i.macd_hist,
 		i.bb_upper, i.bb_middle, i.bb_lower,
-		i.bb_percent_b, i.bb_bandwidth`
+		i.bb_percent_b, i.bb_bandwidth,
+		i.kd_k, i.kd_d,
+		st.ma5, st.ma10, st.ma20`
 
 	query := "SELECT " + historyColumns + " " + dailyJoins + `
 		WHERE r.symbol = $1 ORDER BY r.trade_date DESC LIMIT $2`

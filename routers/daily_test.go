@@ -66,6 +66,7 @@ func TestGetDailyByDate_OK(t *testing.T) {
 		"macd", "macd_signal", "macd_hist",
 		"bb_upper", "bb_middle", "bb_lower",
 		"bb_percent_b", "bb_bandwidth",
+		"kd_k", "kd_d", "ma5", "ma10", "ma20",
 	)
 }
 
@@ -111,6 +112,7 @@ func TestGetStockHistory_OK(t *testing.T) {
 		"macd", "macd_signal", "macd_hist",
 		"bb_upper", "bb_middle", "bb_lower",
 		"bb_percent_b", "bb_bandwidth",
+		"kd_k", "kd_d", "ma5", "ma10", "ma20",
 	)
 
 	var prev string

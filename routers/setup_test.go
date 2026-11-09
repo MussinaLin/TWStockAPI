@@ -81,6 +81,20 @@ func anyStockSymbol(t *testing.T) string {
 	return symbol
 }
 
+// anyDailySymbol returns a symbol that has rows in stock_daily_raw, so
+// daily history tests exercise real data instead of an empty result.
+func anyDailySymbol(t *testing.T) string {
+	t.Helper()
+	var symbol string
+	err := db.Pool().QueryRow(context.Background(),
+		"SELECT symbol FROM stock_daily_raw ORDER BY trade_date DESC LIMIT 1").Scan(&symbol)
+	if errors.Is(err, pgx.ErrNoRows) {
+		t.Skip("no rows in stock_daily_raw")
+	}
+	require.NoError(t, err)
+	return symbol
+}
+
 func anyDailyDate(t *testing.T) string {
 	t.Helper()
 	var d *string

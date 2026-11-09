@@ -81,7 +81,7 @@ func TestGetDailyByDate_NoData(t *testing.T) {
 }
 
 func TestGetStockHistory_OK(t *testing.T) {
-	symbol := anyStockSymbol(t)
+	symbol := anyDailySymbol(t)
 	r := newTestRouter()
 	status, body := doJSON(t, r, "GET", "/api/daily/stock/"+symbol)
 	require.Equal(t, 200, status)
@@ -128,7 +128,7 @@ func TestGetStockHistory_OK(t *testing.T) {
 }
 
 func TestGetStockHistory_LimitHonored(t *testing.T) {
-	symbol := anyStockSymbol(t)
+	symbol := anyDailySymbol(t)
 	r := newTestRouter()
 	status, body := doJSON(t, r, "GET", "/api/daily/stock/"+symbol+"?limit=5")
 	require.Equal(t, 200, status)

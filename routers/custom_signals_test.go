@@ -163,6 +163,18 @@ func TestPutCustomSignal_InvalidRequest(t *testing.T) {
 	assert.Equal(t, 0, signalCount(t, userID))
 }
 
+func TestPutCustomSignal_BodyTooLarge(t *testing.T) {
+	symbol := enabledSymbols(t, 1)[0]
+	userID := newFavoritesUser(t, 0)
+	body := `{"enabled":false,"conditions":[` + strings.Repeat(`{},`, 350000) + `{}]}`
+	require.Greater(t, len(body), 1<<20)
+
+	status, resp := doJSONBody(t, newCustomSignalRouter(userID), "PUT", signalPath(symbol), body)
+	assert.Equal(t, 400, status)
+	assert.Equal(t, map[string]any{"error": "invalid request"}, resp)
+	assert.Equal(t, 0, signalCount(t, userID))
+}
+
 func TestPutCustomSignal_StringPeriod(t *testing.T) {
 	symbol := enabledSymbols(t, 1)[0]
 	userID := newFavoritesUser(t, 0)

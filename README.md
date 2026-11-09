@@ -271,6 +271,8 @@ UPDATE config SET value = 'true', updated_time = now() WHERE key = 'JWT_TOKEN_EN
 | `kd_k` / `kd_d` | number | KD 指標的 K 值／D 值（`stock_daily_indicators`），無資料時為 `null` |
 | `ma5` / `ma10` / `ma20` | number | 收盤價的 5／10／20 日均線（`stock_daily_statistics`），無資料時為 `null` |
 
+**部署前置：** `/api/daily/:date` 與 `/api/daily/stock/:symbol` 會查詢 `stock_daily_indicators.kd_k`、`kd_d` 與 `stock_daily_statistics.ma5`、`ma10`、`ma20`（由 TWStockAnalysis 新增）。部署前請先用 `information_schema.columns` 確認 PROD 已有這些欄位，缺任何一個，兩支 daily API 都會回 `500`。
+
 #### `GET /api/daily/stock/:symbol`
 
 **Path Parameters:**
@@ -918,7 +920,7 @@ WHERE key = 'CUSTOM_SIGNAL_LIMITS';
 | HTTP | Body | 意義 |
 |------|------|------|
 | `200` | 同單檔 GET 的格式 | 建立或覆寫成功（`conditions` 為正規化後的結果） |
-| `400` | `{"error":"invalid request"}` | body 不是合法的 JSON，或沒有 `enabled` |
+| `400` | `{"error":"invalid request"}` | body 不是合法的 JSON、沒有 `enabled`、欄位型別錯誤（例如 `"period":"9"`、`"value":"50"`、`enabled` 不是 boolean）、數字超出範圍（例如 `1e400`），或 body 超過 64 KB |
 | `400` | `{"error":"invalid conditions[i].field"}` | 第 i 個條件（從 0 開始）的 `field` 不合法（`id` / `side` / `kind` / `entity` / `period` / `op` / `value` / `cross`） |
 | `400` | `{"error":"enabled requires conditions"}` | `enabled = true` 但沒有任何條件 |
 | `400` | `{"error":"too many conditions"}` | 多方或空方條件數超過 `conditions_per_side` |

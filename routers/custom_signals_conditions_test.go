@@ -85,6 +85,8 @@ func TestNormalizeConditions_Errors(t *testing.T) {
 	}{
 		{"id empty", []rawSignalCondition{ok(func(c *rawSignalCondition) { c.ID = "" })}, "invalid conditions[0].id"},
 		{"id 65", []rawSignalCondition{ok(func(c *rawSignalCondition) { c.ID = strings.Repeat("x", 65) })}, "invalid conditions[0].id"},
+		{"id NUL", []rawSignalCondition{ok(func(c *rawSignalCondition) { c.ID = "a\u0000b" })}, "invalid conditions[0].id"},
+		{"id newline", []rawSignalCondition{ok(func(c *rawSignalCondition) { c.ID = "a\nb" })}, "invalid conditions[0].id"},
 		{"id dup", []rawSignalCondition{ok(func(c *rawSignalCondition) {}), ok(func(c *rawSignalCondition) {})}, "invalid conditions[1].id"},
 		{"side", []rawSignalCondition{ok(func(c *rawSignalCondition) { c.Side = "both" })}, "invalid conditions[0].side"},
 		{"kind", []rawSignalCondition{ok(func(c *rawSignalCondition) { c.Kind = "abc" })}, "invalid conditions[0].kind"},

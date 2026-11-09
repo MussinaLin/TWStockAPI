@@ -119,6 +119,9 @@ func getCustomSignal(c *gin.Context) {
 	c.JSON(http.StatusOK, detail)
 }
 
+// maxCustomSignalBody 是 PUT body 的大小上限（64 KB）。
+const maxCustomSignalBody = 64 << 10
+
 // putCustomSignal 建立或覆寫單一股票的自訂訊號設定。先以 FOR UPDATE 鎖住 user 的 row，
 // 讓同一個 user 的請求排隊處理，避免同時新增時超過個股數上限。
 func putCustomSignal(c *gin.Context) {
@@ -128,6 +131,9 @@ func putCustomSignal(c *gin.Context) {
 		return
 	}
 	symbol := c.Param("symbol")
+
+	// 限制 body 大小，避免超大 payload 耗盡記憶體；超過上限視同 JSON 解析失敗。
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxCustomSignalBody)
 
 	var req putCustomSignalRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.Enabled == nil {

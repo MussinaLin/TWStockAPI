@@ -123,7 +123,7 @@ Authorization: Bearer <token>
 | HTTP | Body | 意義 |
 |------|------|------|
 | `200` | 同 §3.2 的格式 | 儲存成功；`conditions` 是後端正規化後的結果，請以它為準 |
-| `400` | `{"error":"invalid request"}` | body 不是合法的 JSON，或沒有 `enabled` |
+| `400` | `{"error":"invalid request"}` | body 不是合法的 JSON、沒有 `enabled`、欄位型別錯誤（例如 `"period":"9"`、`"value":"50"`、`enabled` 不是 boolean）、數字超出範圍（例如 `1e400`），或 body 超過 64 KB |
 | `400` | `{"error":"invalid conditions[i].field"}` | 第 `i` 個條件（從 0 開始）的 `field` 不合法；`field` 為 `id` / `side` / `kind` / `entity` / `period` / `op` / `value` / `cross` |
 | `400` | `{"error":"enabled requires conditions"}` | `enabled: true` 但沒有任何條件 |
 | `400` | `{"error":"too many conditions"}` | 多方或空方的條件數超過 `max_conditions_per_side` |
@@ -149,6 +149,7 @@ Authorization: Bearer <token>
 - `enabled`：使用者自己的開關。`enabled = false` 的設定**不畫標記**、也不通知。
 - `active`：是否在會員上限內。同一個使用者的全部設定（**包括 `enabled = false`**）依 `created_time`、再依 `symbol` 排序，前 `max_stocks` 筆為 `active = true`。會員降級後，超過上限的設定會保留，但 `active = false`。
 - `active = false` 時請提示「超過會員上限，未生效」，**且不畫標記**。使用者可以刪除其他設定，後面的設定會依序遞補成 `active = true`。
+- **降級注意**：`max_conditions_per_side` 在每一次 PUT 都會檢查，包括只是切換 `enabled: false` 的請求。會員降級後，若某檔設定的條件數已超過新的上限，PUT 會回 `400 too many conditions`；使用者必須先刪減條件，或改用 DELETE 移除該設定。
 - 新增、修改後請以 PUT 回應或重新 GET 的 `active` 為準，不要自己推算。
 
 ---
@@ -172,6 +173,7 @@ Authorization: Bearer <token>
 | `price_ma` | `close op ma{N}` |
 
 - **嚴格比較**：`gt` / `lt` 相等時不成立。
+- **精確求值**：每個運算式都以 IEEE double 照上表寫法求值，運算元順序不可更動——`vol_ma` 一律用 `vol_ma{N} × value`（不可改成 `volume / vol_ma`），`short_margin_ratio` 一律用 `short_margin_ratio × 100`（不可改成對 `value` 除以 100），這樣標記才會和通知在剛好等於門檻時一致。測試向量：`volume 63`、`vol_ma5 90`、`value 0.7`、`gt` → 成立（`63 > 62.99999999999999`）。
 - **某一方**（多方或空方）：有至少一個條件**且全部成立** → 該方成立。**沒有條件 → 該方永不成立**（只設多方就不會出現空方訊號）。
 
 ### 欄位來源

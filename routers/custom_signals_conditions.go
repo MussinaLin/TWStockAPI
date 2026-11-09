@@ -3,6 +3,8 @@ package routers
 import (
 	"fmt"
 	"math"
+	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -65,13 +67,15 @@ var (
 )
 
 func normalizeConditions(in []rawSignalCondition) ([]signalCondition, error) {
-	out := make([]signalCondition, 0, len(in))
-	seen := make(map[string]bool, len(in))
+	// 不依輸入長度預先配置，避免惡意的超長陣列放大記憶體用量。
+	hint := min(len(in), 64)
+	out := make([]signalCondition, 0, hint)
+	seen := make(map[string]bool, hint)
 	for i, r := range in {
 		fail := func(field string) ([]signalCondition, error) {
 			return nil, &conditionError{Index: i, Field: field}
 		}
-		if n := utf8.RuneCountInString(r.ID); n < 1 || n > 64 || seen[r.ID] {
+		if n := utf8.RuneCountInString(r.ID); n < 1 || n > 64 || seen[r.ID] || strings.ContainsFunc(r.ID, unicode.IsControl) {
 			return fail("id")
 		}
 		seen[r.ID] = true

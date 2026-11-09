@@ -31,7 +31,7 @@ func main() {
 
 	jwtSecret := []byte(os.Getenv("JWT_SECRET"))
 	if len(jwtSecret) == 0 {
-		logger.Warn("JWT_SECRET is not set; /api/favorites will always fail with 500, and other /api routes will too once JWT_TOKEN_ENABLE is on")
+		logger.Warn("JWT_SECRET is not set; /api/favorites and /api/custom-signals will always fail with 500, and other /api routes will too once JWT_TOKEN_ENABLE is on")
 	}
 
 	gin.SetMode(gin.ReleaseMode)

@@ -19,17 +19,17 @@ railway run go run .
 go build -o server .
 ```
 
-Requires `DATABASE_URL` env var (PostgreSQL connection string). Server listens on `PORT` (default `8080`). `JWT_SECRET`（必須與 AccountService 相同）：`/api/favorites` 一律需要，其他 `/api` 在啟用 JWT 驗證時才需要；沒設時啟動只會記 warning，`/api/favorites` 會一律回 500。
+Requires `DATABASE_URL` env var (PostgreSQL connection string). Server listens on `PORT` (default `8080`). `JWT_SECRET`（必須與 AccountService 相同）：`/api/favorites`、`/api/custom-signals` 一律需要，其他 `/api` 在啟用 JWT 驗證時才需要；沒設時啟動只會記 warning，這兩組會一律回 500。
 
 ## Architecture
 
-- **`main.go`** — App entry point: loads `.env`, inits DB pool, registers middleware (`slog-gin`, `gin.Recovery`, CORS allowing `GET` / `POST` / `PUT` / `DELETE` and the `Authorization` header), mounts health checks and API route groups; the `/api` group runs `auth.RequireAuth`; `/api/favorites` additionally runs `auth.RequireLogin`.
+- **`main.go`** — App entry point: loads `.env`, inits DB pool, registers middleware (`slog-gin`, `gin.Recovery`, CORS allowing `GET` / `POST` / `PUT` / `DELETE` and the `Authorization` header), mounts health checks and API route groups; the `/api` group runs `auth.RequireAuth`; `/api/favorites` and `/api/custom-signals` additionally run `auth.RequireLogin`.
 - **`db/db.go`** — PostgreSQL connection pool via `pgxpool` (min 2, max 10 connections).
-- **`db/*.sql`** — 需手動在 DB 執行的 SQL。可重複執行：`config.sql`（`JWT_TOKEN_ENABLE`）、`user_favorites.sql`（`user_config`、`user_favorite_stocks`、`user_favorite_groups` 與 `FAVORITE_GROUPS` 初始值；部署新版程式前先跑；已套用群組版 schema 的環境重跑一次即可加上 `user_favorite_groups`）。**不可重複執行**：`user_favorites_v2_migration.sql`（v1 單一清單 → v2 群組，會刪除所有我的最愛資料；只在套用過 v1 的環境跑一次，staging 已跑過，production 不需要）。
+- **`db/*.sql`** — 需手動在 DB 執行的 SQL。可重複執行：`config.sql`（`JWT_TOKEN_ENABLE`）、`user_favorites.sql`（`user_config`、`user_favorite_stocks`、`user_favorite_groups` 與 `FAVORITE_GROUPS` 初始值；部署新版程式前先跑；已套用群組版 schema 的環境重跑一次即可加上 `user_favorite_groups`）。`user_custom_signals.sql`（`user_stock_signals` 與 `CUSTOM_SIGNAL_LIMITS` 初始值；需先跑 `user_favorites.sql`，因為用到 `user_config`；部署新版程式前先跑）。**不可重複執行**：`user_favorites_v2_migration.sql`（v1 單一清單 → v2 群組，會刪除所有我的最愛資料；只在套用過 v1 的環境跑一次，staging 已跑過，production 不需要）。
 - **`auth/`** — JWT 驗證 filter，掛在 `/api` group（`/health*` 不驗證）。開關為 DB `config` 表的 `JWT_TOKEN_ENABLE`（值為 `'true'` 才啟用；沒有這一列視為 false；60 秒記憶體快取）。`db/config.sql` 建立這一列（預設 `false`）。
   - 啟用時需帶 `Authorization: Bearer <jwt>`（AccountService 簽發，HS256，`JWT_SECRET` 須相同）。`sub` = `users.id`，查 `users` 表取得 email，以 `auth.User{ID, Email}` 存入 `gin.Context`（key `auth.ContextUserKey`）。
   - 過期回 401 `{"error":"token expired"}`；其他驗證失敗回 401 `{"error":"unauthorized"}`；讀 config / users 出錯或未設 `JWT_SECRET` 回 500。
-  - `RequireLogin`：不論開關一律要求有效 JWT（context 已有 user 時直接放行，不重查 DB），目前只掛在 `/api/favorites`。handler 用 `auth.CurrentUser(c)` 取得 user。
+  - `RequireLogin`：不論開關一律要求有效 JWT（context 已有 user 時直接放行，不重查 DB），目前掛在 `/api/favorites` 與 `/api/custom-signals`。handler 用 `auth.CurrentUser(c)` 取得 user。
   - `jwt.go`（`ParseToken`）、`flag.go`（`FlagCache`、`LoadJWTFlag`）、`user.go`（`PgxUserStore`）、`middleware.go`（`RequireAuth`、`RequireLogin`、`CurrentUser`）。
 - **`routers/`** — Route handlers organized by domain:
   - `stocks.go` — `/api/stocks` — stock master data
@@ -39,9 +39,10 @@ Requires `DATABASE_URL` env var (PostgreSQL connection string). Server listens o
   - `market.go` — `/api/market`, `/api/market/dates`, `/api/market/:date` — TAIEX 大盤每日資料（OHLC、總成交量、融資餘額、外資買賣超）
   - `period.go` — `/api/period/holding/:symbol` — 集保持股比例（stock_holder_percent, weekly）；回傳 major_ratio（大戶比例）、retail_ratio（散戶比例）；支援 `?limit`，未帶 limit 時回傳全部
   - `favorites.go` / `favorites_config.go` — `/api/favorites` — 使用者的我的最愛（`user_favorite_stocks`、`user_favorite_groups`），一律需要登入。分成固定數量的群組（`group_no` 從 1 開始；預設名稱「群組一、群組二……」由 `groupName` 產生；不建群組表，`user_favorite_groups` 只存改過名的群組），同一檔可以放在多個群組。群組數與每組上限依 `users.member_level`，設定在 `user_config` 的 `FAVORITE_GROUPS`（JSONB，例如 `{"0":{"groups":5,"stocks_per_group":5}}`；找不到 level 或格式錯誤回 500）。`GET /api/favorites` 回傳 `{max_groups, max_stocks_per_group, groups[{group_no,name,count,items[{symbol,name,created_time}]}]}`（包括空的群組；`name` 有自訂名稱時回傳自訂名稱；群組內 `created_time DESC`）；`POST /api/favorites/groups/:group_no` `{"symbol"}`：201 新增、200 已存在、400 格式錯誤、404 `group not found` / `stock not found`、409 `favorite group full`；`PUT /api/favorites/groups/:group_no` `{"name"}`：200 `{group_no,name}`、400（名稱由 `normalizeGroupName` 檢查：去掉前後空白後 1–10 個字元、不含控制字元）、404 `group not found`；不同群組可重名、沒有還原預設名稱的方式；用 `INSERT ... ON CONFLICT DO UPDATE` 寫入，不加鎖；`DELETE /api/favorites/groups/:group_no/:symbol` 回 204（`group_no` 不是 ≥ 1 的整數回 400、群組不存在回 404）。降級時超過目前群組數的資料與自訂名稱保留但不顯示。POST 在 transaction 裡用 `SELECT ... FOR UPDATE` 鎖住 user 的 row。
+  - `custom_signals.go` / `custom_signals_conditions.go` / `custom_signals_config.go` — `/api/custom-signals` — 使用者的自訂訊號設定（`user_stock_signals`，每檔股票一筆，`conditions` 為 JSONB 陣列），與 favorites 一樣一律需要登入。個股數 `stocks` 與每方條件數 `conditions_per_side` 依 `users.member_level`，設定在 `user_config` 的 `CUSTOM_SIGNAL_LIMITS`（JSONB，例如 `{"0":{"stocks":5,"conditions_per_side":5}}`；找不到 level 或格式錯誤回 500）。`GET /api/custom-signals` 回傳 `{max_stocks,max_conditions_per_side,items[{symbol,name,enabled,active,conditions,created_time,updated_time}]}`（`created_time ASC, symbol ASC`；`name` 來自 JOIN stocks，不看 `stocks.enabled`；沒有設定時 `items` 為 `[]`）；`GET /api/custom-signals/:symbol` 回 `{symbol,enabled,active,conditions,updated_time}`（沒有設定時 `enabled:false,active:true,conditions:[],updated_time:null`；股票不存在或未啟用 404 `stock not found`）；`PUT /api/custom-signals/:symbol` `{enabled,conditions}`：200 回同單檔格式、400 `invalid request` / `invalid conditions[i].field`（`normalizeConditions` 驗證，只留白名單欄位）/ `enabled requires conditions` / `too many conditions`、404 `stock not found`、409 `custom signal limit reached`（新增超過 `stocks`，含 `limit`）；`DELETE /api/custom-signals/:symbol` 回 204（不存在或 symbol 不合法也 204）。`active` 規則（與 SignalNotifier 一致）：同 user 全部設定（含 `enabled=false`）依 `(created_time, symbol)` 排序，第 i 筆（從 0 開始）`active = i < stocks`；降級後超過上限的設定保留但 `active:false`。PUT 在 transaction 裡用 `SELECT ... FOR UPDATE` 鎖住 user 的 row。user 不存在回 401 `unauthorized`。
   - `helpers.go` — `rowsToMaps` converts pgx rows to `[]map[string]any` with type handling (dates → ISO strings, NaN/Inf → nil)
 
-All endpoints except `/api/favorites` are read-only SELECT queries. Response format is JSON. Dates are returned as ISO 8601 strings (`created_time` in favorites is a full RFC 3339 timestamp).
+All endpoints except `/api/favorites` and `/api/custom-signals` are read-only SELECT queries. Response format is JSON. Dates are returned as ISO 8601 strings (`created_time` in favorites is a full RFC 3339 timestamp).
 
 
 ## Workflow

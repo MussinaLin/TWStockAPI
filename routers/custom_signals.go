@@ -19,8 +19,10 @@ import (
 // handler needs the authenticated user.
 func RegisterCustomSignals(rg *gin.RouterGroup, requireLogin gin.HandlerFunc) {
 	g := rg.Group("/custom-signals", requireLogin)
+	g.GET("", listCustomSignals)
 	g.GET("/:symbol", getCustomSignal)
 	g.PUT("/:symbol", putCustomSignal)
+	g.DELETE("/:symbol", deleteCustomSignal)
 }
 
 type customSignalDetail struct {
@@ -219,4 +221,84 @@ func putCustomSignal(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, detail)
+}
+
+type customSignalItem struct {
+	Symbol      string          `json:"symbol"`
+	Name        string          `json:"name"`
+	Enabled     bool            `json:"enabled"`
+	Active      bool            `json:"active"`
+	Conditions  json.RawMessage `json:"conditions"`
+	CreatedTime time.Time       `json:"created_time"`
+	UpdatedTime time.Time       `json:"updated_time"`
+}
+
+// listCustomSignals 列出 user 全部設定，依 (created_time, symbol) 排序；
+// 第 i 筆（從 0 開始）active = i < Stocks，enabled = false 的設定也佔名額。
+func listCustomSignals(c *gin.Context) {
+	user, ok := auth.CurrentUser(c)
+	if !ok {
+		favoritesServerError(c, errors.New("custom signals: no authenticated user"))
+		return
+	}
+	ctx := c.Request.Context()
+
+	rule, err := loadSignalRule(ctx, db.Pool(), selectMemberLevel, user.ID)
+	if err != nil {
+		respondRuleError(c, err)
+		return
+	}
+
+	rows, err := db.Pool().Query(ctx,
+		`SELECT u.symbol, s.name, u.enabled, u.conditions, u.created_time, u.updated_time
+		FROM user_stock_signals u
+		JOIN stocks s ON s.symbol = u.symbol
+		WHERE u.user_id = $1::uuid
+		ORDER BY u.created_time, u.symbol`, user.ID)
+	if err != nil {
+		favoritesServerError(c, fmt.Errorf("custom signals: list: %w", err))
+		return
+	}
+	defer rows.Close()
+	items := []customSignalItem{}
+	for rows.Next() {
+		var it customSignalItem
+		if err := rows.Scan(&it.Symbol, &it.Name, &it.Enabled, &it.Conditions, &it.CreatedTime, &it.UpdatedTime); err != nil {
+			favoritesServerError(c, fmt.Errorf("custom signals: list: %w", err))
+			return
+		}
+		it.Active = len(items) < rule.Stocks
+		items = append(items, it)
+	}
+	if err := rows.Err(); err != nil {
+		favoritesServerError(c, fmt.Errorf("custom signals: list: %w", err))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"max_stocks":              rule.Stocks,
+		"max_conditions_per_side": rule.ConditionsPerSide,
+		"items":                   items,
+	})
+}
+
+// deleteCustomSignal 刪除單一股票的設定；不存在或 symbol 不合法也回 204。
+func deleteCustomSignal(c *gin.Context) {
+	user, ok := auth.CurrentUser(c)
+	if !ok {
+		favoritesServerError(c, errors.New("custom signals: no authenticated user"))
+		return
+	}
+	symbol := c.Param("symbol")
+	if invalidSymbol(symbol) {
+		c.Status(http.StatusNoContent)
+		return
+	}
+	_, err := db.Pool().Exec(c.Request.Context(),
+		"DELETE FROM user_stock_signals WHERE user_id = $1::uuid AND symbol = $2", user.ID, symbol)
+	if err != nil {
+		favoritesServerError(c, fmt.Errorf("custom signals: delete: %w", err))
+		return
+	}
+	c.Status(http.StatusNoContent)
 }

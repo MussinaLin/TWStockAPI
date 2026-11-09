@@ -13,6 +13,7 @@ import (
 	"main/db"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -304,4 +305,160 @@ func TestPutCustomSignal_UnknownLevel(t *testing.T) {
 	assert.Equal(t, 500, status)
 	assert.Equal(t, map[string]any{"detail": "Internal server error"}, resp)
 	assert.Equal(t, 0, signalCount(t, userID))
+}
+
+// ── GET /api/custom-signals ──
+
+func TestListCustomSignals_Empty(t *testing.T) {
+	userID := newFavoritesUser(t, 0)
+	rule := signalRuleFor(t, 0)
+
+	status, body := doJSON(t, newCustomSignalRouter(userID), "GET", "/api/custom-signals")
+	require.Equal(t, 200, status)
+	assert.Equal(t, map[string]any{
+		"max_stocks":              float64(rule.Stocks),
+		"max_conditions_per_side": float64(rule.ConditionsPerSide),
+		"items":                   []any{},
+	}, body)
+}
+
+func TestListCustomSignals_OrderAndFields(t *testing.T) {
+	symbols := enabledSymbols(t, 3)
+	userID := newFavoritesUser(t, 0)
+	base := time.Now().Add(-time.Hour)
+	// Insert out of order; created_time decides.
+	addSignalRow(t, userID, symbols[1], true, base.Add(2*time.Minute))
+	addSignalRow(t, userID, symbols[2], true, base.Add(3*time.Minute))
+	addSignalRow(t, userID, symbols[0], true, base.Add(time.Minute))
+
+	status, body := doJSON(t, newCustomSignalRouter(userID), "GET", "/api/custom-signals")
+	require.Equal(t, 200, status)
+	items := body.(map[string]any)["items"].([]any)
+	require.Len(t, items, 3)
+	for i, it := range items {
+		m := it.(map[string]any)
+		assert.Equal(t, symbols[i], m["symbol"])
+		assert.NotEmpty(t, m["name"])
+		assert.NotEmpty(t, m["created_time"])
+		assert.NotEmpty(t, m["updated_time"])
+		assert.Equal(t, true, m["enabled"])
+		conds := m["conditions"].([]any)
+		require.Len(t, conds, 1)
+		assert.Equal(t, "kd_k", conds[0].(map[string]any)["kind"])
+	}
+}
+
+func TestListCustomSignals_DisabledCountsForActive(t *testing.T) {
+	rule := signalRuleFor(t, 0)
+	if rule.Stocks < 1 {
+		t.Skip("level 0 allows no stocks")
+	}
+	symbols := enabledSymbols(t, rule.Stocks+1)
+	userID := newFavoritesUser(t, 0)
+	r := newCustomSignalRouter(userID)
+	base := time.Now().Add(-time.Hour)
+	for i, s := range symbols {
+		addSignalRow(t, userID, s, i != 0, base.Add(time.Duration(i)*time.Minute))
+	}
+
+	status, body := doJSON(t, r, "GET", "/api/custom-signals")
+	require.Equal(t, 200, status)
+	items := body.(map[string]any)["items"].([]any)
+	require.Len(t, items, rule.Stocks+1)
+	for i, it := range items {
+		m := it.(map[string]any)
+		assert.Equal(t, i < rule.Stocks, m["active"], "index %d", i)
+	}
+	assert.Equal(t, false, items[0].(map[string]any)["enabled"])
+
+	_, got := doJSON(t, r, "GET", signalPath(symbols[rule.Stocks]))
+	assert.Equal(t, false, got.(map[string]any)["active"])
+}
+
+func TestListCustomSignals_TieBreaksBySymbol(t *testing.T) {
+	rule := signalRuleFor(t, 0)
+	if rule.Stocks < 1 {
+		t.Skip("level 0 allows no stocks")
+	}
+	symbols := enabledSymbols(t, rule.Stocks+1)
+	userID := newFavoritesUser(t, 0)
+	r := newCustomSignalRouter(userID)
+	// Stocks-1 earlier rows, then two rows tied on created_time; only the
+	// lower symbol of the tie fits the limit.
+	base := time.Now().Add(-time.Hour)
+	for i := 0; i < rule.Stocks-1; i++ {
+		addSignalRow(t, userID, symbols[i], true, base.Add(time.Duration(i)*time.Minute))
+	}
+	tied := []string{symbols[rule.Stocks-1], symbols[rule.Stocks]}
+	if tied[0] > tied[1] {
+		tied[0], tied[1] = tied[1], tied[0]
+	}
+	// Insert the higher symbol first so insertion order cannot explain the result.
+	tieTime := base.Add(time.Hour / 2)
+	addSignalRow(t, userID, tied[1], true, tieTime)
+	addSignalRow(t, userID, tied[0], true, tieTime)
+	_, err := db.Pool().Exec(context.Background(),
+		"UPDATE user_stock_signals SET created_time = $2 WHERE user_id = $1::uuid AND symbol = ANY($3)",
+		userID, tieTime, tied)
+	require.NoError(t, err)
+
+	status, body := doJSON(t, r, "GET", "/api/custom-signals")
+	require.Equal(t, 200, status)
+	items := body.(map[string]any)["items"].([]any)
+	require.Len(t, items, rule.Stocks+1)
+	low := items[rule.Stocks-1].(map[string]any)
+	high := items[rule.Stocks].(map[string]any)
+	assert.Equal(t, tied[0], low["symbol"])
+	assert.Equal(t, tied[1], high["symbol"])
+	assert.Equal(t, true, low["active"])
+	assert.Equal(t, false, high["active"])
+
+	_, got := doJSON(t, r, "GET", signalPath(tied[0]))
+	assert.Equal(t, true, got.(map[string]any)["active"])
+	_, got = doJSON(t, r, "GET", signalPath(tied[1]))
+	assert.Equal(t, false, got.(map[string]any)["active"])
+}
+
+func TestListCustomSignals_OnlyOwn(t *testing.T) {
+	symbols := enabledSymbols(t, 2)
+	me := newFavoritesUser(t, 0)
+	other := newFavoritesUser(t, 0)
+	addSignalRow(t, me, symbols[0], true, time.Now())
+	addSignalRow(t, other, symbols[1], true, time.Now())
+
+	_, body := doJSON(t, newCustomSignalRouter(me), "GET", "/api/custom-signals")
+	items := body.(map[string]any)["items"].([]any)
+	require.Len(t, items, 1)
+	assert.Equal(t, symbols[0], items[0].(map[string]any)["symbol"])
+}
+
+func TestListCustomSignals_UserGone(t *testing.T) {
+	status, body := doJSON(t, newCustomSignalRouter(uuid.NewString()), "GET", "/api/custom-signals")
+	require.Equal(t, 401, status)
+	assert.Equal(t, map[string]any{"error": "unauthorized"}, body)
+}
+
+// ── DELETE /api/custom-signals/:symbol ──
+
+func TestDeleteCustomSignal(t *testing.T) {
+	symbol := enabledSymbols(t, 1)[0]
+	userID := newFavoritesUser(t, 0)
+	r := newCustomSignalRouter(userID)
+	addSignalRow(t, userID, symbol, true, time.Now())
+
+	status, body := doJSON(t, r, "DELETE", signalPath(symbol))
+	assert.Equal(t, 204, status)
+	assert.Nil(t, body)
+	assert.Equal(t, 0, signalCount(t, userID))
+
+	_, got := doJSON(t, r, "GET", signalPath(symbol))
+	m := got.(map[string]any)
+	assert.Equal(t, false, m["enabled"])
+	assert.Nil(t, m["updated_time"])
+	assert.Equal(t, []any{}, m["conditions"])
+
+	status, _ = doJSON(t, r, "DELETE", signalPath(symbol))
+	assert.Equal(t, 204, status)
+	status, _ = doJSON(t, r, "DELETE", signalPath("NOPE-XYZ"))
+	assert.Equal(t, 204, status)
 }

@@ -11,7 +11,7 @@ tags:
 
 台股分析資料 REST API Server，使用 Go + [Gin](https://gin-gonic.com/) 框架。
 
-資料來源為 PostgreSQL，由 [TWStockAnalysis](../TWStockAnalysis) 批次作業負責寫入。唯一的例外是「我的最愛」（`/api/favorites`），由本服務寫入 `user_favorite_stocks` 與 `user_favorite_groups`。
+資料來源為 PostgreSQL，由 [TWStockAnalysis](../TWStockAnalysis) 批次作業負責寫入。例外是「我的最愛」（`/api/favorites`，寫入 `user_favorite_stocks`、`user_favorite_groups`）與「自訂訊號」（`/api/custom-signals`，寫入 `user_stock_signals`）。
 
 [![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template/dTvvSf)
 
@@ -31,7 +31,7 @@ cp .env.example .env
 | 環境變數 | 必填 | 說明 |
 |----------|------|------|
 | `DATABASE_URL` | 是 | PostgreSQL 連線字串 |
-| `JWT_SECRET` | 是（`/api/favorites` 一律需要；其他 `/api` 在啟用 JWT 驗證時需要） | 驗證 JWT 的密鑰，必須與 AccountService 的 `JWT_SECRET` 相同 |
+| `JWT_SECRET` | 是（`/api/favorites`、`/api/custom-signals` 一律需要；其他 `/api` 在啟用 JWT 驗證時需要） | 驗證 JWT 的密鑰，必須與 AccountService 的 `JWT_SECRET` 相同 |
 | `PORT` | 否 | 服務 port，預設 `8080` |
 
 ## 啟動
@@ -79,7 +79,7 @@ UPDATE config SET value = 'true', updated_time = now() WHERE key = 'JWT_TOKEN_EN
 
 第一次設定時執行 `db/config.sql` 建立這一列（預設 `false`）。
 
-**例外：`/api/favorites/*` 一律需要登入**，不受 `JWT_TOKEN_ENABLE` 影響，驗證失敗的回應同上表。
+**例外：`/api/favorites/*` 與 `/api/custom-signals/*` 一律需要登入**，不受 `JWT_TOKEN_ENABLE` 影響，驗證失敗的回應同上表。
 
 前端串接方式（如何在 request 帶 token、401 處理、CORS）見 [docs/frontend-api-auth-integration.md](docs/frontend-api-auth-integration.md)。
 
@@ -850,6 +850,89 @@ WHERE key = 'FAVORITE_GROUPS';
 
 ---
 
+### Custom Signals — 自訂訊號
+
+**一律需要登入**：不論 `JWT_TOKEN_ENABLE` 為何，都必須帶 `Authorization: Bearer <token>`；驗證失敗的回應見[認證](#認證)。
+
+使用者針對個股設定多空條件，通知由另一個服務（SignalNotifier）發送，圖上標記由前端用同一套規則畫。每檔股票一筆設定；個股數與每方條件數依 `users.member_level` 而定。
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/custom-signals` | 查詢自己所有的設定 |
+| GET | `/api/custom-signals/:symbol` | 查詢單一股票的設定 |
+| PUT | `/api/custom-signals/:symbol` | 建立或覆寫單一股票的設定 |
+| DELETE | `/api/custom-signals/:symbol` | 刪除單一股票的設定 |
+
+規則設定在 `user_config` 表的 `CUSTOM_SIGNAL_LIMITS`（JSONB，key 為 member_level 字串，`stocks` ≥ 0、`conditions_per_side` ≥ 1）。修改規則：
+
+```sql
+UPDATE user_config
+SET value = '{"0": {"stocks": 5, "conditions_per_side": 5}, "1": {"stocks": 20, "conditions_per_side": 10}}'
+WHERE key = 'CUSTOM_SIGNAL_LIMITS';
+```
+
+**資料表（部署新版程式之前先執行）：** `db/user_custom_signals.sql`（需先套用 `db/user_favorites.sql`，可重複執行），建立 `user_stock_signals`（`PRIMARY KEY (user_id, symbol)`）並寫入 `CUSTOM_SIGNAL_LIMITS` 初始值。SQL 還沒執行時，API 會回 `500`。
+
+前端串接方式與條件格式見 [docs/frontend-custom-signal-integration.md](docs/frontend-custom-signal-integration.md)。
+
+**`active`：** 同一個使用者的全部設定（包括 `enabled = false`）依 `(created_time, symbol)` 由小到大排序，第 i 筆（從 0 開始）`active = i < stocks`。`active = false` 的設定保留但不生效（例如會員降級後）。
+
+#### `GET /api/custom-signals`
+
+**Response (200)：**
+
+```json
+{
+  "max_stocks": 5,
+  "max_conditions_per_side": 5,
+  "items": [
+    {
+      "symbol": "2330",
+      "name": "台積電",
+      "enabled": true,
+      "active": true,
+      "conditions": [
+        { "id": "a1", "side": "long", "kind": "rsi", "period": 9, "op": "gt", "value": 50 }
+      ],
+      "created_time": "2026-11-09T09:12:00Z",
+      "updated_time": "2026-11-09T09:12:00Z"
+    }
+  ]
+}
+```
+
+`items` 依 `created_time ASC, symbol ASC`；`name` 來自 `stocks`（不看 `stocks.enabled`）；沒有設定時 `items` 為 `[]`。
+
+#### `GET /api/custom-signals/:symbol`
+
+**Response (200)：** `{"symbol","enabled","active","conditions","updated_time"}`。沒有設定時回 `{"symbol":"2330","enabled":false,"active":true,"conditions":[],"updated_time":null}`。
+
+| HTTP | Body | 意義 |
+|------|------|------|
+| `404` | `{"error":"stock not found"}` | 股票不存在或後端未啟用 |
+
+#### `PUT /api/custom-signals/:symbol`
+
+**Request body：** `{"enabled": true, "conditions": [ ... ]}`。`enabled` 必填（boolean）。條件欄位只保留白名單欄位，其餘忽略；格式見前端串接文件 §2。
+
+| HTTP | Body | 意義 |
+|------|------|------|
+| `200` | 同單檔 GET 的格式 | 建立或覆寫成功（`conditions` 為正規化後的結果） |
+| `400` | `{"error":"invalid request"}` | body 不是合法的 JSON，或沒有 `enabled` |
+| `400` | `{"error":"invalid conditions[i].field"}` | 第 i 個條件（從 0 開始）的 `field` 不合法（`id` / `side` / `kind` / `entity` / `period` / `op` / `value` / `cross`） |
+| `400` | `{"error":"enabled requires conditions"}` | `enabled = true` 但沒有任何條件 |
+| `400` | `{"error":"too many conditions"}` | 多方或空方條件數超過 `conditions_per_side` |
+| `404` | `{"error":"stock not found"}` | 股票不存在或後端未啟用 |
+| `409` | `{"error":"custom signal limit reached","limit":5}` | 新增一檔會超過 `stocks`（覆寫既有的不受限） |
+
+#### `DELETE /api/custom-signals/:symbol`
+
+刪除單一股票的設定。不論原本是否存在（包括 symbol 不存在或不合法），一律回 `204`（沒有 body）。
+
+所有 endpoint 另有：`401 {"error":"unauthorized"}`（未登入、token 無效，或使用者已不存在）、`401 {"error":"token expired"}`、`500 {"detail":"Internal server error"}`（後端錯誤，例如規則設定有誤）。
+
+---
+
 ### Trade Records
 
 | Method | Path | Description |
@@ -908,4 +991,4 @@ WHERE key = 'FAVORITE_GROUPS';
 
 HTTP Status Code: `500`
 
-啟用 JWT 驗證時，驗證失敗回傳 `401`，詳見[認證](#認證)。`/api/favorites/*` 不論開關一律驗證，驗證失敗同樣回 `401`。
+啟用 JWT 驗證時，驗證失敗回傳 `401`，詳見[認證](#認證)。`/api/favorites/*`、`/api/custom-signals/*` 不論開關一律驗證，驗證失敗同樣回 `401`。

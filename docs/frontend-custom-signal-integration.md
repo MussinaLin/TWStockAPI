@@ -194,11 +194,53 @@ Authorization: Bearer <token>
 
 ---
 
-## 7. 前端需配合的事項
+## 7. 未綁定 Telegram 時的引導
+
+通知只會發給已綁定 Telegram 的使用者。設定自訂訊號時若還沒綁定，前端應引導使用者去綁，但**不要擋住儲存**：沒綁定也能儲存、啟用，圖上的標記照畫，只是條件成立時不會收到通知。
+
+### 7.1 判斷是否已綁定
+
+綁定狀態在 **AccountService** 的 `GET /api/auth/me`（`user.telegram`），本服務的 `/api/custom-signals` 回應不含這個資訊。
+
+| `user.telegram` | 意思 |
+|---|---|
+| `null` | 未綁定 |
+| `{ "username": "@alice", "bound_at": "..." }` | 已綁定 |
+
+**進入設定頁時重新呼叫一次 `/api/auth/me`，不要只用登入時存下來的 user。** 使用者在 Telegram 封鎖 bot 時，後端會立刻解除綁定，登入時快取的資料會過時。
+
+```js
+const ACCOUNT_API = "https://<account-service>";
+// authHeaders、goToLogin 同 AccountService docs/frontend-telegram-integration.md §3.1
+
+// 回傳 null（未綁定）或 { username, bound_at }
+async function getTelegramBinding() {
+  const res = await fetch(`${ACCOUNT_API}/api/auth/me`, { headers: authHeaders() });
+  if (res.status === 401) return goToLogin();
+  const { user } = await res.json();
+  return user.telegram;
+}
+```
+
+### 7.2 UI 建議
+
+| 時機 | 未綁定 | 已綁定 |
+|---|---|---|
+| 進入設定頁 | 頁面上方常駐提示「尚未綁定 Telegram，條件成立時不會收到通知」＋「綁定 Telegram」按鈕 | 顯示「通知會發到 Telegram `@username`」 |
+| 儲存成功（`enabled: true`） | 提示「設定已儲存。綁定 Telegram 才會收到通知」＋「立即綁定」/「稍後」 | 不需提示 |
+| 按下綁定 | 在當頁開啟 Telegram 連結並輪詢 `/api/auth/me`，`telegram` 不為 `null` 後提示自動消失；**不要導離設定頁**，避免使用者正在編輯的條件遺失 | — |
+
+- 綁定連結（`POST /api/telegram/bind-code`）、開窗方式與輪詢範例見 AccountService `docs/frontend-telegram-integration.md` §2、§3.1。
+- `bind-code` 回 `503`（該環境未啟用 Telegram 綁定）時，隱藏綁定按鈕與上述提示。
+- 「稍後」只是關掉這次的提示；頁面上方的常駐提示要等綁定完成才消失。
+
+---
+
+## 8. 前端需配合的事項
 
 - 設定改用本文件的 API 讀寫，不再存 localStorage。
 - 外資 / 投信 N 日均改用 `foreign_net_{N}d_avg` / `trust_net_{N}d_avg`。
 - KD、`price_ma` 判斷用 `kd_k`、`kd_d`、`ma5`、`ma10`、`ma20`。
 - `active = false` 提示「超過會員上限，未生效」且不畫標記；`enabled = false` 不畫標記。
 - 在說明文字中告知 §6 的兩個已知例外。
-- 綁定 Telegram 的按鈕與狀態見 AccountService 的 `docs/frontend-telegram-integration.md`。
+- 未綁定 Telegram 時依 §7 引導使用者綁定（不擋儲存）；綁定按鈕與狀態細節見 AccountService 的 `docs/frontend-telegram-integration.md`。

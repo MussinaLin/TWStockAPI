@@ -16,7 +16,8 @@ func RegisterMarket(rg *gin.RouterGroup) {
 }
 
 const marketColumns = `trade_date, taiex_open, taiex_high, taiex_low, taiex_close,
-	total_volume, margin_balance, margin_balance_change, foreign_net`
+	total_volume, margin_balance, margin_balance_change, foreign_net,
+	txf_foreign_oi_net, txf_total_oi_net, tw_vix_close, day_trade_sell_amount_pct`
 
 func listMarketDaily(c *gin.Context) {
 	limit := parseLimit(c, 500, 1500)

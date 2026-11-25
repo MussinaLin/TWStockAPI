@@ -27,6 +27,15 @@ var marketKeys = []string{
 	"total_volume",
 	"margin_balance", "margin_balance_change",
 	"foreign_net",
+	"txf_foreign_oi_net", "txf_total_oi_net",
+	"tw_vix_close",
+	"day_trade_sell_amount_pct",
+}
+
+var marketExtraKeys = []string{
+	"txf_foreign_oi_net", "txf_total_oi_net",
+	"tw_vix_close",
+	"day_trade_sell_amount_pct",
 }
 
 func TestListMarketDaily_OK(t *testing.T) {
@@ -141,4 +150,54 @@ func TestGetMarketByDate_NotFound(t *testing.T) {
 	m, ok := body.(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, "not found", m["error"])
+}
+
+func TestGetMarketByDate_ExtraFieldsMatchDB(t *testing.T) {
+	date := anyMarketDate(t)
+
+	var dbVals [4]*float64
+	err := db.Pool().QueryRow(context.Background(),
+		`SELECT txf_foreign_oi_net::float8, txf_total_oi_net::float8,
+		        tw_vix_close::float8, day_trade_sell_amount_pct::float8
+		 FROM market_daily WHERE trade_date = $1`, date).
+		Scan(&dbVals[0], &dbVals[1], &dbVals[2], &dbVals[3])
+	require.NoError(t, err)
+
+	r := newTestRouter()
+	status, body := doJSON(t, r, "GET", "/api/market/"+date)
+	require.Equal(t, 200, status)
+
+	m, ok := body.(map[string]any)
+	require.True(t, ok, "expected single object, got %T", body)
+	requireKeys(t, m, marketExtraKeys...)
+
+	for i, key := range marketExtraKeys {
+		if dbVals[i] == nil {
+			assert.Nil(t, m[key], "%s should be null", key)
+			continue
+		}
+		got, ok := m[key].(float64)
+		require.True(t, ok, "%s should be a number, got %T", key, m[key])
+		assert.InDelta(t, *dbVals[i], got, 1e-9, "%s should equal DB value", key)
+	}
+}
+
+func TestGetMarketByDate_NullDayTradePct(t *testing.T) {
+	var d *string
+	err := db.Pool().QueryRow(context.Background(),
+		`SELECT MAX(trade_date)::text FROM market_daily
+		 WHERE day_trade_sell_amount_pct IS NULL`).Scan(&d)
+	require.NoError(t, err)
+	if d == nil {
+		t.Skip("no market_daily row with NULL day_trade_sell_amount_pct")
+	}
+
+	r := newTestRouter()
+	status, body := doJSON(t, r, "GET", "/api/market/"+*d)
+	require.Equal(t, 200, status)
+
+	m, ok := body.(map[string]any)
+	require.True(t, ok, "expected single object, got %T", body)
+	requireKeys(t, m, "day_trade_sell_amount_pct")
+	assert.Nil(t, m["day_trade_sell_amount_pct"])
 }

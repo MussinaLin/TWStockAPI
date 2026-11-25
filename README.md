@@ -659,10 +659,25 @@ UPDATE config SET value = 'true', updated_time = now() WHERE key = 'JWT_TOKEN_EN
     "total_volume": 285000000000,
     "margin_balance": 285000000000,
     "margin_balance_change": -1500000000,
-    "foreign_net": 5800000000
+    "foreign_net": 5800000000,
+    "txf_foreign_oi_net": -103182,
+    "txf_total_oi_net": -5401,
+    "tw_vix_close": 26.18,
+    "day_trade_sell_amount_pct": 0.2804
   }
 ]
 ```
+
+**Response 欄位（期貨 / VIX / 當沖）：**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `txf_foreign_oi_net` | int \| null | 台指期外資未平倉淨口數（口） |
+| `txf_total_oi_net` | int \| null | 台指期三大法人合計未平倉淨口數（口） |
+| `tw_vix_close` | number \| null | 台指 VIX 收盤 |
+| `day_trade_sell_amount_pct` | number \| null | 當沖賣出金額佔比，比率（`0.2804` = 28.04%） |
+
+上述欄位照 DB 原值回傳，資料缺漏時為 `null`。`GET /api/market/:date` 回應格式相同。
 
 #### `GET /api/market/dates`
 
@@ -698,7 +713,11 @@ UPDATE config SET value = 'true', updated_time = now() WHERE key = 'JWT_TOKEN_EN
   "total_volume": 285000000000,
   "margin_balance": 285000000000,
   "margin_balance_change": -1500000000,
-  "foreign_net": 5800000000
+  "foreign_net": 5800000000,
+  "txf_foreign_oi_net": -103182,
+  "txf_total_oi_net": -5401,
+  "tw_vix_close": 26.18,
+  "day_trade_sell_amount_pct": 0.2804
 }
 ```
 

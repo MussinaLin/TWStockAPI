@@ -663,7 +663,9 @@ UPDATE config SET value = 'true', updated_time = now() WHERE key = 'JWT_TOKEN_EN
     "txf_foreign_oi_net": -103182,
     "txf_total_oi_net": -5401,
     "tw_vix_close": 26.18,
-    "day_trade_sell_amount_pct": 0.2804
+    "day_trade_sell_amount_pct": 0.2804,
+    "sig_bottom": false,
+    "sig_top": true
   }
 ]
 ```
@@ -677,7 +679,16 @@ UPDATE config SET value = 'true', updated_time = now() WHERE key = 'JWT_TOKEN_EN
 | `tw_vix_close` | number \| null | 台指 VIX 收盤 |
 | `day_trade_sell_amount_pct` | number \| null | 當沖賣出金額佔比，比率（`0.2804` = 28.04%） |
 
-上述欄位照 DB 原值回傳，資料缺漏時為 `null`。`GET /api/market/:date` 回應格式相同。
+上述欄位照 DB 原值回傳，資料缺漏時為 `null`。
+
+**Response 欄位（大盤訊號，來自 `market_daily_signal`）：**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `sig_bottom` | bool | 底部訊號：`market_daily_signal.sig_bottom` 或 `sig_retail_exit` 任一為 true 即為 `true` |
+| `sig_top` | bool | 頭部訊號：`market_daily_signal.sig_top` |
+
+該日沒有訊號資料時兩欄皆為 `false`，不會是 `null`。`GET /api/market/:date` 回應格式相同。
 
 #### `GET /api/market/dates`
 
@@ -717,7 +728,9 @@ UPDATE config SET value = 'true', updated_time = now() WHERE key = 'JWT_TOKEN_EN
   "txf_foreign_oi_net": -103182,
   "txf_total_oi_net": -5401,
   "tw_vix_close": 26.18,
-  "day_trade_sell_amount_pct": 0.2804
+  "day_trade_sell_amount_pct": 0.2804,
+  "sig_bottom": false,
+  "sig_top": true
 }
 ```
 

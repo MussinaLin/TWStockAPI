@@ -30,6 +30,7 @@ var marketKeys = []string{
 	"txf_foreign_oi_net", "txf_total_oi_net",
 	"tw_vix_close",
 	"day_trade_sell_amount_pct",
+	"sig_bottom", "sig_top",
 }
 
 var marketExtraKeys = []string{
@@ -200,4 +201,92 @@ func TestGetMarketByDate_NullDayTradePct(t *testing.T) {
 	require.True(t, ok, "expected single object, got %T", body)
 	requireKeys(t, m, "day_trade_sell_amount_pct")
 	assert.Nil(t, m["day_trade_sell_amount_pct"])
+}
+
+type marketSignal struct{ bottom, top bool }
+
+// expectedMarketSignals reads the raw market_daily_signal flags and derives
+// the expected API values in Go: sig_bottom = sig_bottom || sig_retail_exit,
+// sig_top = sig_top. Dates without a signal row are absent (expect false).
+func expectedMarketSignals(t *testing.T) map[string]marketSignal {
+	t.Helper()
+	rows, err := db.Pool().Query(context.Background(),
+		`SELECT trade_date::text, sig_bottom, sig_retail_exit, sig_top
+		 FROM market_daily_signal`)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	want := map[string]marketSignal{}
+	for rows.Next() {
+		var d string
+		var bottom, retailExit, top bool
+		require.NoError(t, rows.Scan(&d, &bottom, &retailExit, &top))
+		want[d] = marketSignal{bottom: bottom || retailExit, top: top}
+	}
+	require.NoError(t, rows.Err())
+	return want
+}
+
+func TestListMarketDaily_SignalsMatchDB(t *testing.T) {
+	want := expectedMarketSignals(t)
+
+	r := newTestRouter()
+	status, body := doJSON(t, r, "GET", "/api/market?limit=1500")
+	require.Equal(t, 200, status)
+
+	arr, ok := body.([]any)
+	require.True(t, ok)
+	if len(arr) == 0 {
+		t.Skip("no rows in market_daily")
+	}
+
+	for _, item := range arr {
+		m := item.(map[string]any)
+		d := m["trade_date"].(string)
+		require.IsType(t, true, m["sig_bottom"], "sig_bottom on %s", d)
+		require.IsType(t, true, m["sig_top"], "sig_top on %s", d)
+		w := want[d]
+		assert.Equal(t, w.bottom, m["sig_bottom"], "sig_bottom on %s", d)
+		assert.Equal(t, w.top, m["sig_top"], "sig_top on %s", d)
+	}
+}
+
+func TestGetMarketByDate_RetailExitCountsAsBottom(t *testing.T) {
+	var d *string
+	err := db.Pool().QueryRow(context.Background(),
+		`SELECT MAX(trade_date)::text FROM market_daily_signal
+		 WHERE sig_retail_exit AND NOT sig_bottom`).Scan(&d)
+	require.NoError(t, err)
+	if d == nil {
+		t.Skip("no market_daily_signal row with only sig_retail_exit")
+	}
+
+	r := newTestRouter()
+	status, body := doJSON(t, r, "GET", "/api/market/"+*d)
+	require.Equal(t, 200, status)
+
+	m, ok := body.(map[string]any)
+	require.True(t, ok, "expected single object, got %T", body)
+	assert.Equal(t, true, m["sig_bottom"])
+}
+
+func TestGetMarketByDate_NoSignalRowIsFalse(t *testing.T) {
+	var d *string
+	err := db.Pool().QueryRow(context.Background(),
+		`SELECT MAX(m.trade_date)::text FROM market_daily m
+		 WHERE NOT EXISTS (
+		   SELECT 1 FROM market_daily_signal s WHERE s.trade_date = m.trade_date)`).Scan(&d)
+	require.NoError(t, err)
+	if d == nil {
+		t.Skip("every market_daily row has a market_daily_signal row")
+	}
+
+	r := newTestRouter()
+	status, body := doJSON(t, r, "GET", "/api/market/"+*d)
+	require.Equal(t, 200, status)
+
+	m, ok := body.(map[string]any)
+	require.True(t, ok, "expected single object, got %T", body)
+	assert.Equal(t, false, m["sig_bottom"])
+	assert.Equal(t, false, m["sig_top"])
 }
